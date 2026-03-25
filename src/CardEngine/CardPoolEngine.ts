@@ -77,6 +77,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         return this;
     }
 
+    /** Fuzzy searches the card pool and returns a list of cards. */
     fuzzySearch(query: string, options?: { limit?: number; released?: boolean }): FuzzySearchResult<T> {
         const pool = this.cache.cardPool;
         const source = options?.released ? pool.allReleased : pool.all;
@@ -112,6 +113,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         };
     }
 
+    /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
     fuzzySearchIdentity(query: string, options?: { limit?: number }): FuzzySearchIdentityResult {
         const pool = this.cache.cardPool;
         const lowerQuery = query.toLowerCase();
@@ -144,6 +146,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         };
     }
 
+    /** Gets a card from the card pool. */
     get(cardId: string, released?: boolean): T | undefined {
         const pool = this.cache.cardPool;
         return released ? pool.allReleased.get(cardId) : pool.all.get(cardId);
@@ -159,6 +162,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         return this.sort(results);
     }
 
+    /** Samples a number of cards from the card pool. */
     sample(limit: number, options?: SampleOptions): SampleResult<T> {
         const pool = this.cache.cardPool;
         const picked = new Set<string>(options?.excludeCardIds);
@@ -215,10 +219,12 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         return { cards: results };
     }
 
+    /** Sorts a list of cards by an opinionated order. */
     sort(cards: T[]): T[] {
         return [...cards].sort(this.config.sortFn);
     }
 
+    /** Creates a new card in the database and uploads its image to the CDN. */
     async insert(
         data: { namePrefix: string; imageUrl: string; cdnRoute: string; card: Partial<T> },
         stageFns?: [() => any, () => any, () => any]
@@ -250,6 +256,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         return card;
     }
 
+    /** Modifies a card in the database. */
     async update(cardId: string, update: Partial<T>): Promise<T | null> {
         if (!this.pool) await this.init();
 
@@ -264,7 +271,10 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         return updated;
     }
 
+    /** Removes a card from the database and removes its image from the CDN. Removes the card from player inventories afterwards. */
     async delete(cardId: string): Promise<boolean> {
+        if (!this.pool) await this.init();
+
         const existing = this.pool?.get(cardId);
         if (!existing) return false;
 
@@ -287,6 +297,48 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         } else {
             await this.cache.refreshAll();
         }
+    }
+
+    /** Swaps the image of a card in the database. */
+    async swapImage(cardId: string, newImageUrl: string, options: { namePrefix: string; cdnRoute: string }): Promise<T> {
+        if (!this.pool) await this.init();
+
+        const card = this.get(cardId);
+        if (!card) throw new Error(`${cardId} is not an existing card ID`);
+
+        const bunnyCDN = useBunnyCDN();
+
+        // Upload new image
+        const imageResult = await bunnyCDN.uploadImageFromUrl(
+            newImageUrl,
+            buildCardFilename(options.namePrefix, newImageUrl),
+            options.cdnRoute
+        );
+        if (!imageResult.success) throw new Error("Failed to upload card image");
+
+        // Delete old card image
+        await bunnyCDN.delete(card.asset.cdn.filePath);
+
+        // Update card in the database
+        const modifiedCard = await this.config.cardSchema.update(
+            { cardId },
+            { "asset.imageUrl": imageResult.cdnUrl!, "asset.cdn.filePath": imageResult.path! },
+            { returnDocument: "after" }
+        );
+        if (!modifiedCard) throw new Error(`Failed to update card (${cardId}) in the database`);
+
+        // Update cache
+        await this.cache.refreshMany([cardId]);
+
+        // Return the updated card
+        return modifiedCard;
+    }
+
+    /** Releases a batch of cards in the database and updates the card pool. */
+    async release(cardIds: string[]): Promise<T[]> {
+        await this.config.cardSchema.updateAll({ cardId: { $in: cardIds } }, { "state.released": true });
+        await this.cache.refreshMany(cardIds);
+        return this.getMany(cardIds, true);
     }
 }
 
