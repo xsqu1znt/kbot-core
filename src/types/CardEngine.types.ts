@@ -1,5 +1,5 @@
 import { CardPool } from "@/CardEngine";
-import { CardLike } from "@/types/card.types";
+import { CardLike, InventoryCardLike } from "@/types/card.types";
 import type { EventEmitter } from "node:events";
 import type { MongoSchemaBuilder } from "vimcord";
 
@@ -61,7 +61,7 @@ export type SortFunction<T> = (a: T, b: T) => number;
 
 export interface CardPoolEngineConfig<T extends CardLike> {
     cardSchema: MongoSchemaBuilder<T>;
-    inventorySchema: MongoSchemaBuilder<T>;
+    inventoryCardSchema: MongoSchemaBuilder<any>;
     indices: IndexConfig<T, any>[];
     nestedIndices?: NestedIndexConfig<T, any, any>[];
     dropRates: DropRateConfig;

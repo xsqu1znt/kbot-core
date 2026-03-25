@@ -6,3 +6,8 @@ export interface CardLike {
         droppable: boolean;
     };
 }
+
+export interface InventoryCardLike {
+    userId: string;
+    cardId: string;
+}

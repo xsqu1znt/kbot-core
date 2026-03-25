@@ -77,7 +77,7 @@ declare const InventorySchema: MongoSchemaBuilder<ICustomCard>;
 export const { engine, useCardEngine, useCardPool } = createCardPoolEngine<ICustomCard>({
     // Your MongoDB schema builder
     cardSchema: CardSchema,
-    inventorySchema: InventorySchema,
+    inventoryCardSchema: InventorySchema,
 
     // Define your indices - these are used for fast lookups and identity searches
     indices: [
@@ -346,7 +346,7 @@ declare const SpecialInventorySchema: MongoSchemaBuilder<ISpecialCard>;
 
 const specialKit = createCardPoolEngine<ISpecialCard>({
     cardSchema: SpecialCardSchema,
-    inventorySchema: SpecialInventorySchema,
+    inventoryCardSchema: SpecialInventorySchema,
     indices: [
         { name: "byName", getKey: c => c.identity.name },
         { name: "byPower", getKey: c => c.specialPower }

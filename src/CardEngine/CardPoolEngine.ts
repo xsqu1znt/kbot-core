@@ -273,7 +273,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
             await bunnyCDN.delete(existing.asset.cdn.filePath);
             await this.config.cardSchema.delete({ cardId });
             await this.cache.removeMany([cardId]);
-            await this.config.inventorySchema.deleteAll({ cardId });
+            await this.config.inventoryCardSchema.deleteAll({ cardId });
             return true;
         } catch (err) {
             console.error("Failed to delete card", err);
