@@ -1,5 +1,5 @@
 import { CardLike } from "@/types/card.types";
-import type { IndexConfig, NestedIndexConfig } from "@/types/CardEngine.types";
+import { IndexConfig, NestedIndexConfig } from "@/types/cardIndex.types";
 import { EventEmitter } from "node:events";
 import type { MongoSchemaBuilder } from "vimcord";
 import { CardPool } from "./CardPool";
@@ -39,9 +39,7 @@ export class CardPoolCache<T extends CardLike> extends EventEmitter {
 
     private enqueue(fn: () => Promise<void>): Promise<void> {
         this.refreshQueue = this.refreshQueue
-            .then(() => {
-                this.initPromise ?? Promise.resolve();
-            })
+            .then(() => this.initPromise ?? Promise.resolve())
             .then(() => fn())
             .catch(err => {
                 this.emit("error", err instanceof Error ? err : new Error(String(err)));
@@ -50,24 +48,26 @@ export class CardPoolCache<T extends CardLike> extends EventEmitter {
         return this.refreshQueue;
     }
 
+    private async fetchAndReplacePool(): Promise<void> {
+        const myVersion = ++this.version;
+        const cards = await this.cardSchema.fetchAll();
+
+        if (myVersion !== this.version) return;
+
+        const pool = new CardPool<T>(this.indexConfigs, this.nestedIndexConfigs);
+        for (const card of cards) pool.insert(card);
+
+        this.pool = pool;
+        this.emit("refreshed", cards.length);
+    }
+
     async refreshAll(): Promise<void> {
-        await this.enqueue(async () => {
-            const myVersion = ++this.version;
-            const cards = await this.cardSchema.fetchAll();
-
-            if (myVersion !== this.version) return;
-
-            const pool = new CardPool<T>(this.indexConfigs, this.nestedIndexConfigs);
-            for (const card of cards) pool.insert(card);
-
-            this.pool = pool;
-            this.emit("refreshed", cards.length);
-        });
+        await this.enqueue(() => this.fetchAndReplacePool());
     }
 
     async refreshMany(cardIds: string[]): Promise<void> {
         await this.enqueue(async () => {
-            if (!this.pool) return this.refreshAll();
+            if (!this.pool) return this.fetchAndReplacePool();
 
             const cards = await this.cardSchema.fetchAll({ cardId: { $in: cardIds } });
             for (const card of cards) {
@@ -84,12 +84,12 @@ export class CardPoolCache<T extends CardLike> extends EventEmitter {
 
     async removeMany(cardIds: string[]): Promise<void> {
         await this.enqueue(async () => {
-            if (!this.pool) await this.refreshAll();
+            if (!this.pool) return this.fetchAndReplacePool();
 
             for (const cardId of cardIds) {
-                const existing = this.pool!.get(cardId);
+                const existing = this.pool.get(cardId);
                 if (existing) {
-                    this.pool!.remove(existing);
+                    this.pool.remove(existing);
                     this.emit("cardRemoved", existing);
                 }
             }

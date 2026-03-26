@@ -13,7 +13,7 @@ export interface FetchedImageWithSharp {
 }
 
 export interface RenderedMediaWithSharp {
-    canvas: sharp.Sharp;
+    image: sharp.Sharp;
     buffer: Buffer;
     dimensions: MediaDimensions;
     fileName: string;

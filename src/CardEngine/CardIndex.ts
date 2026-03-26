@@ -1,5 +1,8 @@
 import { CardLike } from "@/types/card.types";
-import type { ICardIndex, KeyExtractor, Validator } from "@/types/CardEngine.types";
+import type { ICardIndex, KeyExtractor, Validator } from "@/types/cardIndex.types";
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
+const EMPTY_MAP: ReadonlyMap<any, any> = new Map();
 
 export class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
     private readonly map = new Map<K, Set<string>>();
@@ -26,7 +29,7 @@ export class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
     }
 
     get(key: K): ReadonlySet<string> {
-        return this.map.get(key) ?? CardIndex.EMPTY;
+        return this.map.get(key) ?? EMPTY_SET;
     }
 
     has(key: K): boolean {
@@ -48,8 +51,6 @@ export class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
     clear(): void {
         this.map.clear();
     }
-
-    private static readonly EMPTY: ReadonlySet<string> = new Set();
 }
 
 export class NestedCardIndex<T extends CardLike, K1, K2> implements ICardIndex<T> {
@@ -82,18 +83,16 @@ export class NestedCardIndex<T extends CardLike, K1, K2> implements ICardIndex<T
         this.map.get(k1)?.get(k2)?.delete(card.cardId);
     }
 
-    get(key1: K1, key2: K2): ReadonlySet<string> {
-        return this.map.get(key1)?.get(key2) ?? NestedCardIndex.EMPTY;
+    get(key1: K1, key2: K2 | undefined): ReadonlySet<string> {
+        if (key2 === undefined) return EMPTY_SET;
+        return this.map.get(key1)?.get(key2) ?? EMPTY_SET;
     }
 
     getOuter(key1: K1): ReadonlyMap<K2, Set<string>> {
-        return this.map.get(key1) ?? NestedCardIndex.EMPTY_MAP;
+        return this.map.get(key1) ?? EMPTY_MAP;
     }
 
     clear(): void {
         this.map.clear();
     }
-
-    private static readonly EMPTY: ReadonlySet<string> = new Set<string>();
-    private static readonly EMPTY_MAP: ReadonlyMap<never, never> = new Map<never, never>();
 }

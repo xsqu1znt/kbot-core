@@ -1,31 +1,107 @@
 import { useBunnyCDN } from "@/MediaTools";
 import { CardLike } from "@/types/card.types";
-import type {
-    CardPoolEngineConfig,
-    CompiledWeightRarity,
-    CompiledWeightTier,
-    FuzzySearchIdentityResult,
-    FuzzySearchResult,
-    InsertNewCardData,
-    SampleOptions,
-    SampleResult
-} from "@/types/CardEngine.types";
+import { IndexConfig, NestedIndexConfig } from "@/types/cardIndex.types";
+import { UpdateQuery } from "mongoose";
 import { EventEmitter } from "node:events";
-import { choice, has, merge, str, weighted } from "qznt";
+import { choice, str, weighted } from "qznt";
+import type { MongoSchemaBuilder } from "vimcord";
 import { CardIndex, NestedCardIndex } from "./CardIndex";
 import { CardPool } from "./CardPool";
 import { CardPoolCache } from "./CardPoolCache";
+
+interface DropRateRarity {
+    rarity: number;
+    oneIn: number;
+}
+
+interface DropRateTier {
+    type: string | number;
+    oneIn: number;
+    rarities?: DropRateRarity[];
+}
+
+interface DropRateConfig {
+    tiers: DropRateTier[];
+}
+
+interface CompiledWeightRarity {
+    rarity: number;
+    oneIn: number;
+    compiledWeight: number;
+}
+
+interface CompiledWeightTier {
+    type: string | number;
+    oneIn: number;
+    compiledWeight: number;
+    rarities?: CompiledWeightRarity[];
+}
+
+interface FuzzySearchField<T> {
+    name: string;
+    getter: (card: T) => string | undefined;
+}
+
+interface FuzzySearchConfig<T> {
+    fields: FuzzySearchField<T>[];
+}
+
+type SortFunction<T> = (a: T, b: T) => number;
+
+export interface CardPoolEngineConfig<T extends CardLike> {
+    cardSchema: MongoSchemaBuilder<T>;
+    inventoryCardSchema: MongoSchemaBuilder<any>;
+    indices: IndexConfig<T, any>[];
+    nestedIndices?: NestedIndexConfig<T, any, any>[];
+    dropRates: DropRateConfig;
+    fuzzySearch: FuzzySearchConfig<T>;
+    sortFn: SortFunction<T>;
+}
+
+export interface CardPoolEngineEvents<T> {
+    initialized: [];
+    refreshed: [count: number];
+    cardInserted: [card: T];
+    cardRemoved: [card: T];
+    cardUpdated: [card: T, oldCard: T];
+    error: [error: Error];
+}
+
+export interface InsertNewCardData<T> {
+    namePrefix: string;
+    imageUrl: string;
+    cdnRoute: string;
+    card: Partial<T>;
+}
+
+export interface SampleOptions {
+    userId?: string;
+    excludeCardIds?: string[];
+}
+
+export type SampleResult<T> = [cards: T[], failReason?: string];
+
+export interface FuzzySearchResult<T> {
+    results: T[];
+    formatted: string[];
+    nv: Array<{ name: string; value: string }>;
+}
+
+export interface FuzzySearchIdentityResult {
+    results: Array<{ key: string; cardIds: string[] }>;
+    formatted: string[];
+    nv: Array<{ name: string; value: string }>;
+}
 
 function buildCardFilename(namePrefix: string, imageUrl: string) {
     const imageExt = imageUrl.split("?").shift()?.split(".").pop();
     return `${namePrefix.toUpperCase()}_CARD_${Date.now()}${str(2, "alpha", { casing: "upper" })}.${imageExt}`;
 }
 
-function compileWeightPool<T extends CardLike>(dropRates: CardPoolEngineConfig<T>["dropRates"]): CompiledWeightTier[] {
-    const result: CompiledWeightTier[] = [];
+function compileWeightPool<T extends CardLike>(dropRates: DropRateConfig): CompiledWeightTier[] {
     const totalRawBaseWeight = dropRates.tiers.reduce((acc, cur) => acc + 1 / cur.oneIn, 0);
 
-    for (const tier of dropRates.tiers) {
+    return dropRates.tiers.map(tier => {
         const compiled: CompiledWeightTier = {
             type: tier.type,
             oneIn: tier.oneIn,
@@ -33,28 +109,22 @@ function compileWeightPool<T extends CardLike>(dropRates: CardPoolEngineConfig<T
         };
 
         if (tier.rarities) {
-            compiled.rarities = [];
             const totalRawRarityWeight = tier.rarities.reduce((acc, cur) => acc + 1 / cur.oneIn, 0);
-
-            for (const rarity of tier.rarities) {
-                const compiledRarity: CompiledWeightRarity = {
-                    rarity: rarity.rarity,
-                    oneIn: rarity.oneIn,
-                    compiledWeight: 1 / rarity.oneIn / totalRawRarityWeight
-                };
-                compiled.rarities.push(compiledRarity);
-            }
+            compiled.rarities = tier.rarities.map(r => ({
+                rarity: r.rarity,
+                oneIn: r.oneIn,
+                compiledWeight: 1 / r.oneIn / totalRawRarityWeight
+            }));
         }
 
-        result.push(compiled);
-    }
-
-    return result;
+        return compiled;
+    });
 }
 
 export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     private cache: CardPoolCache<T>;
     private compiledDropRates: CompiledWeightTier[];
+    private initialized = false;
 
     constructor(private config: CardPoolEngineConfig<T>) {
         super();
@@ -74,8 +144,13 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
 
     async init(): Promise<this> {
         await this.cache.init();
+        this.initialized = true;
         this.emit("initialized");
         return this;
+    }
+
+    private async ensureInit(): Promise<void> {
+        if (!this.initialized) await this.init();
     }
 
     /** Fuzzy searches the card pool and returns a list of cards. */
@@ -87,10 +162,9 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         const results: T[] = [];
         for (const card of source.values()) {
             if (results.length >= (options?.limit ?? 25)) break;
-
             for (const field of this.config.fuzzySearch.fields) {
                 const value = field.getter(card)?.toLowerCase();
-                if (value && value.startsWith(lowerQuery)) {
+                if (value?.startsWith(lowerQuery)) {
                     results.push(card);
                     break;
                 }
@@ -98,19 +172,17 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         }
 
         const sorted = this.sort(results);
-
-        const formatted = sorted.map(card => {
-            const parts = this.config.fuzzySearch.fields.map(f => f.getter(card)).filter(Boolean);
-            return parts.join(" · ");
-        });
+        const formatted = sorted.map(card =>
+            this.config.fuzzySearch.fields
+                .map(f => f.getter(card))
+                .filter(Boolean)
+                .join(" · ")
+        );
 
         return {
             results: sorted,
             formatted,
-            nv: sorted.map((card, idx) => ({
-                name: formatted[idx]!,
-                value: card.cardId
-            }))
+            nv: sorted.map((card, idx) => ({ name: formatted[idx]!, value: card.cardId }))
         };
     }
 
@@ -124,17 +196,13 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
 
         for (const [name, index] of pool.indices) {
             if (results.length >= limit) break;
-
             for (const [key, cardIds] of index.entries()) {
                 if (results.length >= limit) break;
                 if (key.toLowerCase().startsWith(lowerQuery)) {
                     results.push({
                         key: String(key),
                         cardIds: Array.from(cardIds),
-                        nv: {
-                            name: `[${name}] ${key}`,
-                            value: `${name}:${key}`
-                        }
+                        nv: { name: `[${name}] ${key}`, value: `${name}:${key}` }
                     });
                 }
             }
@@ -174,43 +242,37 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
 
             let selectedRarity: number | undefined;
             if (selectedType.rarities) {
-                const rarityObj = weighted(selectedType.rarities, r => r.compiledWeight);
-                selectedRarity = rarityObj.rarity;
+                selectedRarity = weighted(selectedType.rarities, r => r.compiledWeight).rarity;
             }
 
             let candidates: Set<string> | undefined;
 
-            for (const [name, nestedIndex] of pool.nestedIndices) {
+            for (const [, nestedIndex] of pool.nestedIndices) {
                 if (nestedIndex instanceof NestedCardIndex) {
-                    const nestedCandidates = nestedIndex.get(selectedType.type, selectedRarity);
-                    if (nestedCandidates?.size) {
-                        candidates = new Set(nestedCandidates);
+                    const found = nestedIndex.get(selectedType.type, selectedRarity);
+                    if (found.size) {
+                        candidates = new Set(found);
                         break;
                     }
                 }
             }
 
             if (!candidates?.size) {
-                for (const [name, index] of pool.indices) {
+                for (const [, index] of pool.indices) {
                     if (index instanceof CardIndex) {
-                        const typeCandidates = index.get(selectedType.type);
-                        if (typeCandidates?.size) {
-                            candidates = new Set(typeCandidates);
+                        const found = index.get(selectedType.type);
+                        if (found.size) {
+                            candidates = new Set(found);
                             break;
                         }
                     }
                 }
             }
 
-            if (!candidates?.size) {
-                candidates = new Set(pool.all.keys());
-            }
+            if (!candidates?.size) candidates = new Set(pool.all.keys());
 
             const available = Array.from(candidates).filter(id => !picked.has(id));
-
-            if (!available.length) {
-                return [[], "Not enough cards were available to drop."];
-            }
+            if (!available.length) return [[], "Not enough cards were available to drop."];
 
             const cardId = choice(available);
             picked.add(cardId);
@@ -227,15 +289,14 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
 
     /** Creates a new card in the database and uploads its image to the CDN. */
     async insert(data: InsertNewCardData<T>, stageFns?: [() => any, () => any, () => any]): Promise<T> {
-        if (!this.pool) await this.init();
+        await this.ensureInit();
 
-        const existing = this.pool?.get(data.card.cardId!);
+        const existing = this.pool.get(data.card.cardId!);
         if (existing) throw new Error(`Card (${data.card.cardId}) already exists`);
         if (!data.imageUrl) throw new Error("Card must have an image URL");
 
         const bunnyCDN = useBunnyCDN();
 
-        // --- Upload New Image ---
         await stageFns?.[0]();
         const imageResult = await bunnyCDN.uploadImageFromUrl(
             data.imageUrl,
@@ -244,58 +305,38 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         );
         if (!imageResult.success) throw new Error("Failed to upload card image");
 
-        // --- Create Card ---
         await stageFns?.[1]();
-        data.card.asset = {
-            imageUrl: imageResult.cdnUrl!,
-            cdn: {
-                filePath: imageResult.path!
-            }
-        };
-        const [card] = await this.config.cardSchema.create([data.card]);
+        const [card] = await this.config.cardSchema.create([
+            { ...data.card, asset: { imageUrl: imageResult.cdnUrl!, cdn: { filePath: imageResult.path! } } } as any
+        ]);
         if (!card) throw new Error("Failed to insert card into database");
 
-        // --- Refresh Cache ---
         await stageFns?.[2]();
         await this.cache.refreshMany([card.cardId]);
 
         return card;
     }
 
-    /** Modifies a card in the database. */
-    async update(cardId: string, update: Partial<T>): Promise<T | null> {
-        if (!this.pool) await this.init();
+    /** Modifies a card in the database. Supports atomic operators e.g. $inc. */
+    async modify(cardId: string, update: UpdateQuery<T>): Promise<T | null> {
+        await this.ensureInit();
 
-        const oldCard = this.pool!.get(cardId);
+        const oldCard = this.pool.get(cardId);
         if (!oldCard) return null;
 
-        const merged = merge({}, oldCard, update);
-        const updated = await this.config.cardSchema.update({ cardId }, merged, { returnDocument: "after" });
+        const updated = await this.config.cardSchema.update({ cardId }, update, { returnDocument: "after" });
         if (!updated) return null;
 
-        await this.cache.refreshMany([cardId]);
-        return updated;
-    }
-
-    /** Modifies a card directly in the cache then updates the database. This ensures updates that would be subject to race conditions are applied immediately. */
-    async updateSync(cardId: string, update: (card: T) => T): Promise<T | null> {
-        if (!this.pool) await this.init();
-
-        const oldCard = this.pool!.get(cardId);
-        if (!oldCard) return null;
-
-        const updated = update(oldCard);
         this.pool.insert(updated);
-        await this.config.cardSchema.update({ cardId }, updated, { returnDocument: "after" });
-
+        this.emit("cardUpdated", updated, oldCard);
         return updated;
     }
 
-    /** Removes a card from the database and removes its image from the CDN. Removes the card from player inventories afterwards. */
+    /** Removes a card from the database and CDN, and clears it from player inventories. */
     async delete(cardId: string): Promise<boolean> {
-        if (!this.pool) await this.init();
+        await this.ensureInit();
 
-        const existing = this.pool?.get(cardId);
+        const existing = this.pool.get(cardId);
         if (!existing) return false;
 
         try {
@@ -312,45 +353,52 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Swaps the image of a card in the database. */
-    async swapImage(cardId: string, newImageUrl: string, options: { namePrefix: string; cdnRoute: string }): Promise<T> {
-        if (!this.pool) await this.init();
+    async swapImage(
+        cardId: string,
+        newImageUrl: string,
+        options: { namePrefix: string; cdnRoute: string }
+    ): Promise<T | null> {
+        await this.ensureInit();
 
-        const card = this.get(cardId);
-        if (!card) throw new Error(`${cardId} is not an existing card ID`);
+        const oldCard = this.get(cardId);
+        if (!oldCard) return null;
 
         const bunnyCDN = useBunnyCDN();
 
-        // Upload new image
         const imageResult = await bunnyCDN.uploadImageFromUrl(
             newImageUrl,
             buildCardFilename(options.namePrefix, newImageUrl),
             options.cdnRoute
         );
-        if (!imageResult.success) throw new Error("Failed to upload card image");
+        if (!imageResult.success) return null;
 
-        // Delete old card image
-        await bunnyCDN.delete(card.asset.cdn.filePath);
+        await bunnyCDN.delete(oldCard.asset.cdn.filePath);
 
-        // Update card in the database
-        const modifiedCard = await this.config.cardSchema.update(
+        const updated = await this.config.cardSchema.update(
             { cardId },
             { "asset.imageUrl": imageResult.cdnUrl!, "asset.cdn.filePath": imageResult.path! },
             { returnDocument: "after" }
         );
-        if (!modifiedCard) throw new Error(`Failed to update card (${cardId}) in the database`);
+        if (!updated) return null;
 
-        // Update cache
-        await this.cache.refreshMany([cardId]);
-
-        // Return the updated card
-        return modifiedCard;
+        this.pool.insert(updated);
+        this.emit("cardUpdated", updated, oldCard);
+        return updated;
     }
 
-    /** Releases a batch of cards in the database and updates the card pool. */
+    /** Releases a batch of cards and updates the cache. */
     async release(cardIds: string[]): Promise<T[]> {
+        await this.ensureInit();
+
+        const oldCards = this.getMany(cardIds);
         await this.config.cardSchema.updateAll({ cardId: { $in: cardIds } }, { "state.released": true });
         await this.cache.refreshMany(cardIds);
-        return this.getMany(cardIds, true);
+
+        const updated = this.getMany(cardIds, true);
+        for (let i = 0; i < updated.length; i++) {
+            this.emit("cardUpdated", updated[i], oldCards[i]);
+        }
+        return updated;
     }
 
     async refresh(cardIds?: string[]): Promise<void> {
@@ -364,7 +412,6 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
 
 export function createCardPoolEngine<T extends CardLike>(config: CardPoolEngineConfig<T>) {
     const engine = new CardPoolEngine<T>(config);
-
     let initPromise: Promise<CardPoolEngine<T>> | null = null;
 
     const useCardEngine = async (): Promise<CardPoolEngine<T>> => {

@@ -1,7 +1,8 @@
 import { CardLike } from "@/types/card.types";
-import type { ICardIndex, IndexConfig, NestedIndexConfig } from "@/types/CardEngine.types";
+import type { ICardIndex, IndexConfig, NestedIndexConfig } from "@/types/cardIndex.types";
 import { CardIndex, NestedCardIndex } from "./CardIndex";
 
+/** Fallback validator applied to indices that don't specify one. Only indexes released and droppable cards. */
 const defaultValidator = <T extends CardLike>(card: T): boolean => card.state.released && card.state.droppable;
 
 export class CardPool<T extends CardLike> {
@@ -33,10 +34,7 @@ export class CardPool<T extends CardLike> {
 
     insert(card: T): void {
         const existing = this.all.get(card.cardId);
-        if (existing) {
-            this.remove(existing);
-            this.allReleased.delete(card.cardId);
-        }
+        if (existing) this.remove(existing);
 
         this.all.set(card.cardId, card);
         if (card.state.released) this.allReleased.set(card.cardId, card);

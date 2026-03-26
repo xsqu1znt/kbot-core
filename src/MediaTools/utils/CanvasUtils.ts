@@ -10,21 +10,23 @@ export class CanvasUtils {
         options: {
             font?: string;
             fontSize?: number;
+            fontStyle?: string;
+            fontWeight?: string;
             align?: "left" | "center" | "right";
             color?: string;
         } = {}
     ) {
-        const { font, fontSize = 32, align = "left", color = "#000" } = options || {};
+        const { font, fontSize = 32, fontStyle, fontWeight, align = "left", color = "#000" } = options;
+
         const canvas = createCanvas(canvasWidth, canvasHeight);
         const ctx = canvas.getContext("2d");
 
-        ctx.font = `${fontSize}px${font ? ` ${font}` : ""}`;
+        const fontParts = [fontStyle, fontWeight, `${fontSize}px`, font].filter(Boolean).join(" ");
+        ctx.font = fontParts;
         ctx.fillStyle = color;
         ctx.textAlign = align;
-        ctx.fillText(text, xPos, yPos);
+        ctx.fillText(text, xPos, yPos, canvasWidth);
 
         return canvas.toBuffer("image/png");
     }
 }
-
-export default CanvasUtils;

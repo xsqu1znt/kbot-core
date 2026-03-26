@@ -4,9 +4,9 @@ import { memory } from "qznt";
 export type BunnyCDNRegion = "uk" | "ny" | "la" | "sg" | "se" | "br" | "jh" | "syd";
 
 export interface BunnyCDNOptions {
-    accessKey: string;
-    storageZone: string;
-    pullZone: string;
+    accessKey?: string;
+    storageZone?: string;
+    pullZone?: string;
     region?: BunnyCDNRegion;
 }
 
@@ -24,18 +24,27 @@ export interface BunnyCDN_Upload {
 }
 
 export class BunnyCDN {
-    static instance: BunnyCDN | null = null;
+    private static instance: BunnyCDN | null = null;
     private options: BunnyCDNOptions;
 
-    constructor(options: BunnyCDNOptions) {
-        if (BunnyCDN.instance) throw new Error("Only one instance of BunnyCDN is allowed");
-
+    private constructor(options: BunnyCDNOptions) {
         if (!options.accessKey) throw new Error("Missing BunnyCDN access key");
         if (!options.storageZone) throw new Error("Missing BunnyCDN storage zone");
         if (!options.pullZone) throw new Error("Missing BunnyCDN pull zone");
 
         this.options = options;
-        BunnyCDN.instance = this;
+    }
+
+    static use(): BunnyCDN {
+        if (!BunnyCDN.instance) {
+            BunnyCDN.instance = new BunnyCDN({
+                accessKey: process.env.BUNNY_ACCESS_KEY,
+                storageZone: process.env.BUNNY_STORAGE_ZONE,
+                pullZone: process.env.BUNNY_PULL_ZONE,
+                region: process.env.BUNNY_REGION as BunnyCDNRegion | undefined
+            });
+        }
+        return BunnyCDN.instance;
     }
 
     private buildHeaders(headers?: Record<string, string>) {
@@ -59,15 +68,14 @@ export class BunnyCDN {
     async uploadImageFromUrl(url: string, filename: string, folder?: string): Promise<BunnyCDN_Upload> {
         try {
             const res = await axios.get(url, { responseType: "arraybuffer" });
-            if (!res || !res?.data) {
+            if (!res.data) {
                 console.error(`BunnyCDN: Failed to fetch image from URL: ${url}`);
                 return { success: false };
             }
 
-            const buffer = Buffer.from(res.data);
-            return this.uploadFromBuffer(buffer, filename, folder);
+            return this.uploadFromBuffer(Buffer.from(res.data), filename, folder);
         } catch (err) {
-            console.error(`BunnyCDN: Failed to fetch image from URL: ${url}`, err);
+            console.error(`BunnyCDN: Failed to fetch image from URL: ${url}`, err instanceof Error ? err.message : err);
             return { success: false };
         }
     }
@@ -92,35 +100,26 @@ export class BunnyCDN {
 
             console.error(`BunnyCDN: Failed to upload buffer, status code: ${res.status}`);
             return { success: false };
-        } catch (err: any) {
-            console.error(`BunnyCDN: Failed to upload buffer: ${err.message}`);
+        } catch (err) {
+            console.error(`BunnyCDN: Failed to upload buffer`, err instanceof Error ? err.message : err);
             return { success: false };
         }
     }
 
-    async delete(path: string) {
+    async delete(path: string): Promise<boolean> {
         const baseUrl = this.buildBaseUrl();
+        const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
 
         try {
-            const res = await axios.delete(`${baseUrl}/${path}`, { headers: this.buildHeaders() });
+            const res = await axios.delete(`${baseUrl}/${normalizedPath}`, { headers: this.buildHeaders() });
             if ([200, 204].includes(res.status)) return true;
             console.error(`BunnyCDN: Delete failed for ${path}, status code: ${res.status}`);
             return false;
-        } catch (err: any) {
-            console.error(`BunnyCDN: Delete failed for ${path}`, err.message);
+        } catch (err) {
+            console.error(`BunnyCDN: Delete failed for ${path}`, err instanceof Error ? err.message : err);
             return false;
         }
     }
 }
 
-export const useBunnyCDN = () => {
-    if (!BunnyCDN.instance) {
-        BunnyCDN.instance = new BunnyCDN({
-            accessKey: process.env.BUNNY_ACCESS_KEY || "",
-            storageZone: process.env.BUNNY_STORAGE_ZONE || "",
-            pullZone: process.env.BUNNY_PULL_ZONE || "",
-            region: process.env.BUNNY_REGION as BunnyCDNRegion | undefined
-        });
-    }
-    return BunnyCDN.instance;
-};
+export const useBunnyCDN = () => BunnyCDN.use();
