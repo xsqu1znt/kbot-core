@@ -1,7 +1,7 @@
 import { useBunnyCDN } from "@/MediaTools";
 import { CardLike } from "@/types/card.types";
 import { IndexConfig, NestedIndexConfig } from "@/types/cardIndex.types";
-import { UpdateQuery } from "mongoose";
+import { RootFilterQuery, UpdateQuery } from "mongoose";
 import { EventEmitter } from "node:events";
 import { choice, str, weighted } from "qznt";
 import type { MongoSchemaBuilder } from "vimcord";

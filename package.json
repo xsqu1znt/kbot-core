@@ -29,7 +29,7 @@
         "@napi-rs/canvas": "^0.1.97",
         "axios": "^1.13.6",
         "discord.js": "^14.25.1",
-        "mongoose": "^9.3.3",
+        "mongoose": "^8.23.0",
         "qznt": "^1.0.36",
         "sharp": "^0.34.5",
         "vimcord": "^1.0.48"
@@ -39,8 +39,8 @@
         "@types/node": "^22.19.15",
         "axios": "^1.13.6",
         "discord.js": "^14.25.1",
-        "mongoose": "^9.3.3",
         "prettier": "^3.8.1",
+        "mongoose": "^8.23.0",
         "qznt": "^1.0.36",
         "sharp": "^0.34.5",
         "tsup": "^8.5.1",

@@ -1,7 +1,6 @@
 # Directories
 .idea/
 node_modules/
-dist/
 
 # Sub-Files
 .vscode/settings.json
