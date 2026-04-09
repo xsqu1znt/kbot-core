@@ -88,9 +88,17 @@ export interface FuzzySearchResult<T> {
 }
 
 export interface FuzzySearchIdentityResult {
-    results: Array<{ key: string; cardIds: string[] }>;
-    formatted: string[];
-    nv: Array<{ name: string; value: string }>;
+    /** Example: "aespa" or "Jaemin" */
+    matchedKey: string;
+    /** Example: "byName" */
+    indexType: string;
+    /** Example: "Name" */
+    indexTypeStripped: string;
+    /** Combined: `${matchedKey}-${indexType}` */
+    identity: string;
+    cardIds: string[];
+    /** Example: [{ name: `[${indexTypeStripped}] ${matchedKey}`, value: `${identity}:${cardIds.join(",")}` }] */
+    // buildNV(results: FuzzySearchIdentityResult): { name: string; value: string }[];
 }
 
 function buildCardFilename(namePrefix: string, imageUrl: string) {
@@ -188,36 +196,37 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
-    fuzzySearchIdentity(query: string, options?: { limit?: number }): FuzzySearchIdentityResult {
+    fuzzySearchIdentity(query: string, options?: { limit?: number }): FuzzySearchIdentityResult[] {
         const pool = this.cache.cardPool;
         const lowerQuery = query.toLowerCase();
         const limit = options?.limit ?? 25;
 
-        const results: Array<{ key: string; identity: string; cardIds: string[]; nv: { name: string; value: string } }> = [];
+        const results: FuzzySearchIdentityResult[] = [];
 
-        for (const [name, index] of pool.indices) {
+        for (const [indexType, index] of pool.indices) {
             if (results.length >= limit) break;
-            for (const [key, cardIds] of index.entries()) {
+
+            for (const [matchedKey, cardIds] of index.entries()) {
                 if (results.length >= limit) break;
-                if (typeof key !== "string") continue;
-                if (key.toLowerCase().startsWith(lowerQuery)) {
+                if (typeof matchedKey !== "string") continue;
+
+                if (matchedKey.toLowerCase().startsWith(lowerQuery)) {
                     const _cardIds = Array.from(cardIds);
-                    const _identity = `${name}:${key}`;
+                    const _indexTypeStripped = indexType.replace("by", "");
+                    const _identity = `${indexType}-${matchedKey}`;
+
                     results.push({
-                        key,
+                        matchedKey,
+                        indexType,
+                        indexTypeStripped: _indexTypeStripped,
                         identity: _identity,
-                        cardIds: _cardIds,
-                        nv: { name: `[${name.replace("by", "")}] ${key}`, value: `${_identity}:${_cardIds.join(",")}` }
+                        cardIds: _cardIds
                     });
                 }
             }
         }
 
-        return {
-            results: results.map(r => ({ key: r.key, cardIds: r.cardIds })),
-            formatted: results.map(r => r.nv.name),
-            nv: results.map(r => r.nv)
-        };
+        return results;
     }
 
     /** Gets a card from the card pool. */

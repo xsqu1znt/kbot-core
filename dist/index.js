@@ -592,28 +592,26 @@ var CardPoolEngine = class extends EventEmitter2 {
     const lowerQuery = query.toLowerCase();
     const limit = options?.limit ?? 25;
     const results = [];
-    for (const [name, index] of pool.indices) {
+    for (const [indexType, index] of pool.indices) {
       if (results.length >= limit) break;
-      for (const [key, cardIds] of index.entries()) {
+      for (const [matchedKey, cardIds] of index.entries()) {
         if (results.length >= limit) break;
-        if (typeof key !== "string") continue;
-        if (key.toLowerCase().startsWith(lowerQuery)) {
+        if (typeof matchedKey !== "string") continue;
+        if (matchedKey.toLowerCase().startsWith(lowerQuery)) {
           const _cardIds = Array.from(cardIds);
-          const _identity = `${name}:${key}`;
+          const _indexTypeStripped = indexType.replace("by", "");
+          const _identity = `${indexType}-${matchedKey}`;
           results.push({
-            key,
+            matchedKey,
+            indexType,
+            indexTypeStripped: _indexTypeStripped,
             identity: _identity,
-            cardIds: _cardIds,
-            nv: { name: `[${name.replace("by", "")}] ${key}`, value: `${_identity}:${_cardIds.join(",")}` }
+            cardIds: _cardIds
           });
         }
       }
     }
-    return {
-      results: results.map((r) => ({ key: r.key, cardIds: r.cardIds })),
-      formatted: results.map((r) => r.nv.name),
-      nv: results.map((r) => r.nv)
-    };
+    return results;
   }
   /** Gets a card from the card pool. */
   get(cardId, released) {

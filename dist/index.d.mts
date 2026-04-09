@@ -163,15 +163,15 @@ interface FuzzySearchResult<T> {
     }>;
 }
 interface FuzzySearchIdentityResult {
-    results: Array<{
-        key: string;
-        cardIds: string[];
-    }>;
-    formatted: string[];
-    nv: Array<{
-        name: string;
-        value: string;
-    }>;
+    /** Example: "aespa" or "Jaemin" */
+    matchedKey: string;
+    /** Example: "byName" */
+    indexType: string;
+    /** Example: "Name" */
+    indexTypeStripped: string;
+    /** Combined: `${matchedKey}-${indexType}` */
+    identity: string;
+    cardIds: string[];
 }
 declare class CardPoolEngine<T extends CardLike> extends EventEmitter {
     private config;
@@ -190,7 +190,7 @@ declare class CardPoolEngine<T extends CardLike> extends EventEmitter {
     /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
     fuzzySearchIdentity(query: string, options?: {
         limit?: number;
-    }): FuzzySearchIdentityResult;
+    }): FuzzySearchIdentityResult[];
     /** Gets a card from the card pool. */
     get(cardId: string, released?: boolean): T | undefined;
     getMany(cardIds: string[], released?: boolean): T[];
