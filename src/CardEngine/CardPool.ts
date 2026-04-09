@@ -5,23 +5,23 @@ import { CardIndex, NestedCardIndex } from "./CardIndex";
 /** Fallback validator applied to indices that don't specify one. Only indexes released and droppable cards. */
 const defaultValidator = <T extends CardLike>(card: T): boolean => card.state.released && card.state.droppable;
 
-export class CardPool<T extends CardLike> {
-    readonly all = new Map<string, T>();
-    readonly allReleased = new Map<string, T>();
-    readonly indices = new Map<string, CardIndex<T>>();
-    readonly nestedIndices = new Map<string, NestedCardIndex<T, any, any>>();
-    private readonly indexList: ICardIndex<T>[] = [];
+export class CardPool<Card extends CardLike> {
+    readonly all = new Map<string, Card>();
+    readonly allReleased = new Map<string, Card>();
+    readonly indices = new Map<string, CardIndex<Card>>();
+    readonly nestedIndices = new Map<string, NestedCardIndex<Card, any, any>>();
+    private readonly indexList: ICardIndex<Card>[] = [];
 
-    constructor(indexConfigs: IndexConfig<T, any>[], nestedIndexConfigs?: NestedIndexConfig<T, any, any>[]) {
+    constructor(indexConfigs: IndexConfig<Card, any>[], nestedIndexConfigs?: NestedIndexConfig<Card, any, any>[]) {
         for (const config of indexConfigs) {
-            const index = new CardIndex<T>(config.getKey, config.validator ?? defaultValidator);
+            const index = new CardIndex<Card>(config.getKey, config.validator ?? defaultValidator);
             this.indices.set(config.name, index);
             this.indexList.push(index);
         }
 
         if (nestedIndexConfigs) {
             for (const config of nestedIndexConfigs) {
-                const index = new NestedCardIndex<T, any, any>(
+                const index = new NestedCardIndex<Card, any, any>(
                     config.getKey1,
                     config.getKey2,
                     config.validator ?? defaultValidator
@@ -32,7 +32,7 @@ export class CardPool<T extends CardLike> {
         }
     }
 
-    insert(card: T): void {
+    insert(card: Card): void {
         const existing = this.all.get(card.cardId);
         if (existing) this.remove(existing);
 
@@ -44,7 +44,7 @@ export class CardPool<T extends CardLike> {
         }
     }
 
-    remove(card: T): void {
+    remove(card: Card): void {
         this.all.delete(card.cardId);
         this.allReleased.delete(card.cardId);
 
@@ -53,7 +53,7 @@ export class CardPool<T extends CardLike> {
         }
     }
 
-    get(cardId: string): T | undefined {
+    get(cardId: string): Card | undefined {
         return this.all.get(cardId);
     }
 
@@ -69,11 +69,11 @@ export class CardPool<T extends CardLike> {
         }
     }
 
-    getIndex(name: string): CardIndex<T> | undefined {
+    getIndex(name: string): CardIndex<Card> | undefined {
         return this.indices.get(name);
     }
 
-    getNestedIndex<K1, K2>(name: string): NestedCardIndex<T, K1, K2> | undefined {
+    getNestedIndex<K1, K2>(name: string): NestedCardIndex<Card, K1, K2> | undefined {
         return this.nestedIndices.get(name);
     }
 }

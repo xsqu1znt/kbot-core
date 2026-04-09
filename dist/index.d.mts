@@ -72,20 +72,20 @@ declare class NestedCardIndex<T extends CardLike, K1, K2> implements ICardIndex<
     clear(): void;
 }
 
-declare class CardPool<T extends CardLike> {
-    readonly all: Map<string, T>;
-    readonly allReleased: Map<string, T>;
-    readonly indices: Map<string, CardIndex<T>>;
-    readonly nestedIndices: Map<string, NestedCardIndex<T, any, any>>;
+declare class CardPool<Card extends CardLike> {
+    readonly all: Map<string, Card>;
+    readonly allReleased: Map<string, Card>;
+    readonly indices: Map<string, CardIndex<Card>>;
+    readonly nestedIndices: Map<string, NestedCardIndex<Card, any, any>>;
     private readonly indexList;
-    constructor(indexConfigs: IndexConfig<T, any>[], nestedIndexConfigs?: NestedIndexConfig<T, any, any>[]);
-    insert(card: T): void;
-    remove(card: T): void;
-    get(cardId: string): T | undefined;
+    constructor(indexConfigs: IndexConfig<Card, any>[], nestedIndexConfigs?: NestedIndexConfig<Card, any, any>[]);
+    insert(card: Card): void;
+    remove(card: Card): void;
+    get(cardId: string): Card | undefined;
     has(cardId: string): boolean;
     clear(): void;
-    getIndex(name: string): CardIndex<T> | undefined;
-    getNestedIndex<K1, K2>(name: string): NestedCardIndex<T, K1, K2> | undefined;
+    getIndex(name: string): CardIndex<Card> | undefined;
+    getNestedIndex<K1, K2>(name: string): NestedCardIndex<Card, K1, K2> | undefined;
 }
 
 declare class CardPoolCache<T extends CardLike> extends EventEmitter {
@@ -118,22 +118,15 @@ interface DropRateTier {
 interface DropRateConfig {
     tiers: DropRateTier[];
 }
-interface FuzzySearchField<T> {
-    name: string;
-    getter: (card: T) => string | undefined;
-}
-interface FuzzySearchConfig<T> {
-    fields: FuzzySearchField<T>[];
-}
 type SortFunction<T> = (a: T, b: T) => number;
-interface CardPoolEngineConfig<T extends CardLike> {
-    cardSchema: MongoSchemaBuilder<T>;
+type FuzzySearchFieldGetter<Card> = (card: Card) => string | number | undefined;
+interface CardPoolEngineConfig<Card extends CardLike> {
+    cardSchema: MongoSchemaBuilder<Card>;
     inventoryCardSchema: MongoSchemaBuilder<any>;
-    indices: IndexConfig<T, any>[];
-    nestedIndices?: NestedIndexConfig<T, any, any>[];
+    indices: IndexConfig<Card, any>[];
+    nestedIndices?: NestedIndexConfig<Card, any, any>[];
     dropRates: DropRateConfig;
-    fuzzySearch: FuzzySearchConfig<T>;
-    sortFn: SortFunction<T>;
+    sortFn: SortFunction<Card>;
 }
 interface CardPoolEngineEvents<T> {
     initialized: [];
@@ -153,14 +146,11 @@ interface SampleOptions {
     userId?: string;
     excludeCardIds?: string[];
 }
-type SampleResult<T> = [cards: T[], failReason?: string];
-interface FuzzySearchResult<T> {
-    results: T[];
-    formatted: string[];
-    nv: Array<{
-        name: string;
-        value: string;
-    }>;
+type SampleResult<Card extends CardLike> = [cards: Card[], failReason?: string];
+interface FuzzySearchOptions<Card extends CardLike, FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>>> {
+    limit?: number;
+    released?: boolean;
+    excludeFields?: keyof FuzzySearchFields[];
 }
 interface FuzzySearchIdentityResult {
     /** Example: "aespa" or "Jaemin" */
@@ -173,54 +163,52 @@ interface FuzzySearchIdentityResult {
     identity: string;
     cardIds: string[];
 }
-declare class CardPoolEngine<T extends CardLike> extends EventEmitter {
+declare class CardPoolEngine<Card extends CardLike, FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>> extends EventEmitter {
     private config;
+    private fuzzySearchFields;
     private cache;
     private compiledDropRates;
     private initialized;
-    constructor(config: CardPoolEngineConfig<T>);
-    get pool(): CardPool<T>;
+    constructor(config: CardPoolEngineConfig<Card>, fuzzySearchFields: FuzzySearchFields);
+    get pool(): CardPool<Card>;
     init(): Promise<this>;
     private ensureInit;
     /** Fuzzy searches the card pool and returns a list of cards. */
-    fuzzySearch(query: string, options?: {
-        limit?: number;
-        released?: boolean;
-    }): FuzzySearchResult<T>;
-    /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
+    fuzzySearch(query: string, options?: FuzzySearchOptions<Card, FuzzySearchFields>): Card[];
+    /** Fuzzy searches the card pool and returns a list of cards by their identifiers.. */
     fuzzySearchIdentity(query: string, options?: {
         limit?: number;
     }): FuzzySearchIdentityResult[];
     /** Gets a card from the card pool. */
-    get(cardId: string, released?: boolean): T | undefined;
-    getMany(cardIds: string[], released?: boolean): T[];
+    get(cardId: string, released?: boolean): Card | undefined;
+    getMany(cardIds: string[], released?: boolean): Card[];
     /** Samples a number of cards from the card pool. */
-    sample(limit: number, options?: SampleOptions): SampleResult<T>;
+    sample(limit: number, options?: SampleOptions): SampleResult<Card>;
     /** Samples a number of cards from the card pool and modifies them, then returns the modified cards. */
-    sampleAndModify(limit: number, update: UpdateQuery<T>, options?: SampleOptions): Promise<SampleResult<T>>;
+    sampleAndModify(limit: number, update: UpdateQuery<Card>, options?: SampleOptions): Promise<SampleResult<Card>>;
     /** Sorts a list of cards by an opinionated order. */
-    sort(cards: T[]): T[];
+    sort(cards: Card[]): Card[];
     /** Creates a new card in the database and uploads its image to the CDN. */
-    insert(data: InsertNewCardData<T>, stageFns?: [() => any, () => any, () => any]): Promise<T>;
+    insert(data: InsertNewCardData<Card>, stageFns?: [() => any, () => any, () => any]): Promise<Card>;
     /** Modifies a card in the database. Supports atomic operators e.g. $inc. */
-    modify(cardId: string, update: UpdateQuery<T>): Promise<T | null>;
+    modify(cardId: string, update: UpdateQuery<Card>): Promise<Card | null>;
     /** Modifies multiple cards in the database. Supports atomic operators e.g. $inc. */
-    modifyMany(cardIds: string[], update: UpdateQuery<T>): Promise<T[]>;
+    modifyMany(cardIds: string[], update: UpdateQuery<Card>): Promise<Card[]>;
     /** Removes a card from the database and CDN, and clears it from player inventories. */
     delete(cardId: string): Promise<boolean>;
     /** Swaps the image of a card in the database. */
     swapImage(cardId: string, newImageUrl: string, options: {
         namePrefix: string;
         cdnRoute: string;
-    }): Promise<T | null>;
+    }): Promise<Card | null>;
     /** Releases a batch of cards and updates the cache. */
-    release(cardIds: string[]): Promise<T[]>;
+    release(cardIds: string[]): Promise<Card[]>;
     refresh(cardIds?: string[]): Promise<void>;
 }
-declare function createCardPoolEngine<T extends CardLike>(config: CardPoolEngineConfig<T>): {
-    engine: CardPoolEngine<T>;
-    useCardEngine: () => Promise<CardPoolEngine<T>>;
-    useCardPool: () => Promise<CardPool<T>>;
+declare function createCardPoolEngine<Card extends CardLike, FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>>(config: CardPoolEngineConfig<Card>, fuzzySearchFields: FuzzySearchFields): {
+    engine: CardPoolEngine<Card, FuzzySearchFields>;
+    useCardEngine: () => Promise<CardPoolEngine<Card, FuzzySearchFields>>;
+    useCardPool: () => Promise<CardPool<Card>>;
 };
 
 interface FetchInventoryCardOptions<InvCard extends InventoryCardLike> {
@@ -373,4 +361,4 @@ declare class ImageManager {
     static scaleBuffer(buffer: Buffer, factor: number): Promise<Buffer>;
 }
 
-export { BunnyCDN, type BunnyCDNOptions, type BunnyCDNRegion, type BunnyCDNUploadOptions, type BunnyCDN_Upload, CanvasUtils, CardGalleryRenderer, CardIndex, type CardLike, CardPool, CardPoolCache, CardPoolEngine, type CardPoolEngineConfig, type CardPoolEngineEvents, type CreateImageGalleryOptions, type FetchedImageWithSharp, type FuzzySearchIdentityResult, type FuzzySearchResult, type ICardIndex, ImageManager, type IndexConfig, type InsertNewCardData, type InventoryCardLike, InventoryEngine, type InventoryEngineConfig, type KeyExtractor, type MappedInventoryCard, type MediaDimensions, NestedCardIndex, type NestedIndexConfig, type RenderedMediaWithSharp, type SampleOptions, type SampleResult, type Validator, createCardPoolEngine, createInventoryEngine, useBunnyCDN };
+export { BunnyCDN, type BunnyCDNOptions, type BunnyCDNRegion, type BunnyCDNUploadOptions, type BunnyCDN_Upload, CanvasUtils, CardGalleryRenderer, CardIndex, type CardLike, CardPool, CardPoolCache, CardPoolEngine, type CardPoolEngineConfig, type CardPoolEngineEvents, type CreateImageGalleryOptions, type FetchedImageWithSharp, type FuzzySearchIdentityResult, type FuzzySearchOptions, type ICardIndex, ImageManager, type IndexConfig, type InsertNewCardData, type InventoryCardLike, InventoryEngine, type InventoryEngineConfig, type KeyExtractor, type MappedInventoryCard, type MediaDimensions, NestedCardIndex, type NestedIndexConfig, type RenderedMediaWithSharp, type SampleOptions, type SampleResult, type Validator, createCardPoolEngine, createInventoryEngine, useBunnyCDN };

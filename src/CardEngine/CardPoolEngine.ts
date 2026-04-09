@@ -37,25 +37,17 @@ interface CompiledWeightTier {
     rarities?: CompiledWeightRarity[];
 }
 
-interface FuzzySearchField<T> {
-    name: string;
-    getter: (card: T) => string | undefined;
-}
-
-interface FuzzySearchConfig<T> {
-    fields: FuzzySearchField<T>[];
-}
-
 type SortFunction<T> = (a: T, b: T) => number;
 
-export interface CardPoolEngineConfig<T extends CardLike> {
-    cardSchema: MongoSchemaBuilder<T>;
+type FuzzySearchFieldGetter<Card> = (card: Card) => string | number | undefined;
+
+export interface CardPoolEngineConfig<Card extends CardLike> {
+    cardSchema: MongoSchemaBuilder<Card>;
     inventoryCardSchema: MongoSchemaBuilder<any>;
-    indices: IndexConfig<T, any>[];
-    nestedIndices?: NestedIndexConfig<T, any, any>[];
+    indices: IndexConfig<Card, any>[];
+    nestedIndices?: NestedIndexConfig<Card, any, any>[];
     dropRates: DropRateConfig;
-    fuzzySearch: FuzzySearchConfig<T>;
-    sortFn: SortFunction<T>;
+    sortFn: SortFunction<Card>;
 }
 
 export interface CardPoolEngineEvents<T> {
@@ -79,12 +71,15 @@ export interface SampleOptions {
     excludeCardIds?: string[];
 }
 
-export type SampleResult<T> = [cards: T[], failReason?: string];
+export type SampleResult<Card extends CardLike> = [cards: Card[], failReason?: string];
 
-export interface FuzzySearchResult<T> {
-    results: T[];
-    formatted: string[];
-    nv: Array<{ name: string; value: string }>;
+export interface FuzzySearchOptions<
+    Card extends CardLike,
+    FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>>
+> {
+    limit?: number;
+    released?: boolean;
+    excludeFields?: keyof FuzzySearchFields[];
 }
 
 export interface FuzzySearchIdentityResult {
@@ -97,8 +92,6 @@ export interface FuzzySearchIdentityResult {
     /** Combined: `${matchedKey}-${indexType}` */
     identity: string;
     cardIds: string[];
-    /** Example: [{ name: `[${indexTypeStripped}] ${matchedKey}`, value: `${identity}:${cardIds.join(",")}` }] */
-    // buildNV(results: FuzzySearchIdentityResult): { name: string; value: string }[];
 }
 
 function buildCardFilename(namePrefix: string, imageUrl: string) {
@@ -129,15 +122,21 @@ function compileWeightPool<T extends CardLike>(dropRates: DropRateConfig): Compi
     });
 }
 
-export class CardPoolEngine<T extends CardLike> extends EventEmitter {
-    private cache: CardPoolCache<T>;
+export class CardPoolEngine<
+    Card extends CardLike,
+    FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>
+> extends EventEmitter {
+    private cache: CardPoolCache<Card>;
     private compiledDropRates: CompiledWeightTier[];
     private initialized = false;
 
-    constructor(private config: CardPoolEngineConfig<T>) {
+    constructor(
+        private config: CardPoolEngineConfig<Card>,
+        private fuzzySearchFields: FuzzySearchFields
+    ) {
         super();
 
-        this.cache = new CardPoolCache<T>(config.cardSchema, config.indices, config.nestedIndices);
+        this.cache = new CardPoolCache<Card>(config.cardSchema, config.indices, config.nestedIndices);
         this.compiledDropRates = compileWeightPool(config.dropRates);
 
         this.cache.on("refreshed", count => this.emit("refreshed", count));
@@ -147,7 +146,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         this.cache.on("error", err => this.emit("error", err));
     }
 
-    get pool(): CardPool<T> {
+    get pool(): CardPool<Card> {
         return this.cache.cardPool;
     }
 
@@ -163,43 +162,48 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Fuzzy searches the card pool and returns a list of cards. */
-    fuzzySearch(query: string, options?: { limit?: number; released?: boolean }): FuzzySearchResult<T> {
+    fuzzySearch(query: string, options: FuzzySearchOptions<Card, FuzzySearchFields> = {}): Card[] {
+        const { limit = 25, released, excludeFields: excludeIndexTypes } = options;
+
         const pool = this.cache.cardPool;
-        const source = options?.released ? pool.allReleased : pool.all;
+        const source = released ? pool.allReleased : pool.all;
         const lowerQuery = query.toLowerCase();
 
-        const results: T[] = [];
+        const fieldGetters = Object.entries(this.fuzzySearchFields)
+            .filter(
+                ([name]) =>
+                    (excludeIndexTypes as unknown as string[])?.length &&
+                    !(excludeIndexTypes as unknown as string[]).includes(name)
+            )
+            .map(([, value]) => value);
+
+        const results: Card[] = [];
         for (const card of source.values()) {
-            if (results.length >= (options?.limit ?? 25)) break;
-            for (const field of this.config.fuzzySearch.fields) {
-                const value = field.getter(card)?.toLowerCase();
-                if (value?.startsWith(lowerQuery)) {
+            if (results.length >= limit) break;
+
+            for (const getter of fieldGetters) {
+                const match = getter(card);
+                if (match === undefined) continue;
+
+                if (typeof match === "string" && match.startsWith(lowerQuery)) {
+                    results.push(card);
+                    break;
+                } else if (typeof match === "number" && match.toString() === lowerQuery) {
                     results.push(card);
                     break;
                 }
             }
         }
 
-        const sorted = this.sort(results);
-        const formatted = sorted.map(card =>
-            this.config.fuzzySearch.fields
-                .map(f => f.getter(card))
-                .filter(Boolean)
-                .join(" · ")
-        );
-
-        return {
-            results: sorted,
-            formatted,
-            nv: sorted.map((card, idx) => ({ name: formatted[idx]!, value: card.cardId }))
-        };
+        return results;
     }
 
-    /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
-    fuzzySearchIdentity(query: string, options?: { limit?: number }): FuzzySearchIdentityResult[] {
+    /** Fuzzy searches the card pool and returns a list of cards by their identifiers.. */
+    fuzzySearchIdentity(query: string, options: { limit?: number } = {}): FuzzySearchIdentityResult[] {
+        const { limit = 25 } = options;
+
         const pool = this.cache.cardPool;
         const lowerQuery = query.toLowerCase();
-        const limit = options?.limit ?? 25;
 
         const results: FuzzySearchIdentityResult[] = [];
 
@@ -230,14 +234,14 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Gets a card from the card pool. */
-    get(cardId: string, released?: boolean): T | undefined {
+    get(cardId: string, released?: boolean): Card | undefined {
         const pool = this.cache.cardPool;
         return released ? pool.allReleased.get(cardId) : pool.all.get(cardId);
     }
 
-    getMany(cardIds: string[], released?: boolean): T[] {
+    getMany(cardIds: string[], released?: boolean): Card[] {
         const pool = this.cache.cardPool;
-        const results: T[] = [];
+        const results: Card[] = [];
         for (const cardId of cardIds) {
             const card = released ? pool.allReleased.get(cardId) : pool.all.get(cardId);
             if (card) results.push(card);
@@ -246,10 +250,10 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Samples a number of cards from the card pool. */
-    sample(limit: number, options?: SampleOptions): SampleResult<T> {
+    sample(limit: number, options?: SampleOptions): SampleResult<Card> {
         const pool = this.cache.cardPool;
         const picked = new Set<string>(options?.excludeCardIds);
-        const results: T[] = [];
+        const results: Card[] = [];
 
         for (let i = 0; i < limit; i++) {
             const selectedType = weighted(this.compiledDropRates, t => t.compiledWeight);
@@ -297,7 +301,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Samples a number of cards from the card pool and modifies them, then returns the modified cards. */
-    async sampleAndModify(limit: number, update: UpdateQuery<T>, options?: SampleOptions): Promise<SampleResult<T>> {
+    async sampleAndModify(limit: number, update: UpdateQuery<Card>, options?: SampleOptions): Promise<SampleResult<Card>> {
         const [cards, failReason] = this.sample(limit, options);
         if (failReason) return [[], failReason];
 
@@ -310,12 +314,12 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Sorts a list of cards by an opinionated order. */
-    sort(cards: T[]): T[] {
+    sort(cards: Card[]): Card[] {
         return [...cards].sort(this.config.sortFn);
     }
 
     /** Creates a new card in the database and uploads its image to the CDN. */
-    async insert(data: InsertNewCardData<T>, stageFns?: [() => any, () => any, () => any]): Promise<T> {
+    async insert(data: InsertNewCardData<Card>, stageFns?: [() => any, () => any, () => any]): Promise<Card> {
         await this.ensureInit();
 
         const existing = this.pool.get(data.card.cardId!);
@@ -345,7 +349,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Modifies a card in the database. Supports atomic operators e.g. $inc. */
-    async modify(cardId: string, update: UpdateQuery<T>): Promise<T | null> {
+    async modify(cardId: string, update: UpdateQuery<Card>): Promise<Card | null> {
         await this.ensureInit();
 
         const oldCard = this.pool.get(cardId);
@@ -360,7 +364,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Modifies multiple cards in the database. Supports atomic operators e.g. $inc. */
-    async modifyMany(cardIds: string[], update: UpdateQuery<T>): Promise<T[]> {
+    async modifyMany(cardIds: string[], update: UpdateQuery<Card>): Promise<Card[]> {
         await this.ensureInit();
 
         const oldCards = cardIds.map(id => this.pool.get(id));
@@ -409,7 +413,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         cardId: string,
         newImageUrl: string,
         options: { namePrefix: string; cdnRoute: string }
-    ): Promise<T | null> {
+    ): Promise<Card | null> {
         await this.ensureInit();
 
         const oldCard = this.get(cardId);
@@ -439,7 +443,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 
     /** Releases a batch of cards and updates the cache. */
-    async release(cardIds: string[]): Promise<T[]> {
+    async release(cardIds: string[]): Promise<Card[]> {
         await this.ensureInit();
 
         const oldCards = this.getMany(cardIds);
@@ -462,17 +466,20 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
     }
 }
 
-export function createCardPoolEngine<T extends CardLike>(config: CardPoolEngineConfig<T>) {
-    const engine = new CardPoolEngine<T>(config);
-    let initPromise: Promise<CardPoolEngine<T>> | null = null;
+export function createCardPoolEngine<
+    Card extends CardLike,
+    FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>
+>(config: CardPoolEngineConfig<Card>, fuzzySearchFields: FuzzySearchFields) {
+    const engine = new CardPoolEngine<Card, FuzzySearchFields>(config, fuzzySearchFields);
+    let initPromise: Promise<CardPoolEngine<Card, FuzzySearchFields>> | null = null;
 
-    const useCardEngine = async (): Promise<CardPoolEngine<T>> => {
+    const useCardEngine = async (): Promise<CardPoolEngine<Card, FuzzySearchFields>> => {
         if (initPromise) return initPromise;
         initPromise = engine.init();
         return initPromise;
     };
 
-    const useCardPool = async (): Promise<CardPool<T>> => {
+    const useCardPool = async (): Promise<CardPool<Card>> => {
         const eng = await useCardEngine();
         return eng.pool;
     };

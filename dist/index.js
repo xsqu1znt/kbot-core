@@ -534,9 +534,10 @@ function compileWeightPool(dropRates) {
   });
 }
 var CardPoolEngine = class extends EventEmitter2 {
-  constructor(config) {
+  constructor(config, fuzzySearchFields) {
     super();
     this.config = config;
+    this.fuzzySearchFields = fuzzySearchFields;
     this.cache = new CardPoolCache(config.cardSchema, config.indices, config.nestedIndices);
     this.compiledDropRates = compileWeightPool(config.dropRates);
     this.cache.on("refreshed", (count) => this.emit("refreshed", count));
@@ -561,36 +562,36 @@ var CardPoolEngine = class extends EventEmitter2 {
     if (!this.initialized) await this.init();
   }
   /** Fuzzy searches the card pool and returns a list of cards. */
-  fuzzySearch(query, options) {
+  fuzzySearch(query, options = {}) {
+    const { limit = 25, released, excludeFields: excludeIndexTypes } = options;
     const pool = this.cache.cardPool;
-    const source = options?.released ? pool.allReleased : pool.all;
+    const source = released ? pool.allReleased : pool.all;
     const lowerQuery = query.toLowerCase();
+    const fieldGetters = Object.entries(this.fuzzySearchFields).filter(
+      ([name]) => excludeIndexTypes?.length && !excludeIndexTypes.includes(name)
+    ).map(([, value]) => value);
     const results = [];
     for (const card of source.values()) {
-      if (results.length >= (options?.limit ?? 25)) break;
-      for (const field of this.config.fuzzySearch.fields) {
-        const value = field.getter(card)?.toLowerCase();
-        if (value?.startsWith(lowerQuery)) {
+      if (results.length >= limit) break;
+      for (const getter of fieldGetters) {
+        const match = getter(card);
+        if (match === void 0) continue;
+        if (typeof match === "string" && match.startsWith(lowerQuery)) {
+          results.push(card);
+          break;
+        } else if (typeof match === "number" && match.toString() === lowerQuery) {
           results.push(card);
           break;
         }
       }
     }
-    const sorted = this.sort(results);
-    const formatted = sorted.map(
-      (card) => this.config.fuzzySearch.fields.map((f) => f.getter(card)).filter(Boolean).join(" \xB7 ")
-    );
-    return {
-      results: sorted,
-      formatted,
-      nv: sorted.map((card, idx) => ({ name: formatted[idx], value: card.cardId }))
-    };
+    return results;
   }
-  /** Fuzzy searches the card pool and returns a list of cards by their identity properties. */
-  fuzzySearchIdentity(query, options) {
+  /** Fuzzy searches the card pool and returns a list of cards by their identifiers.. */
+  fuzzySearchIdentity(query, options = {}) {
+    const { limit = 25 } = options;
     const pool = this.cache.cardPool;
     const lowerQuery = query.toLowerCase();
-    const limit = options?.limit ?? 25;
     const results = [];
     for (const [indexType, index] of pool.indices) {
       if (results.length >= limit) break;
@@ -796,8 +797,8 @@ var CardPoolEngine = class extends EventEmitter2 {
     }
   }
 };
-function createCardPoolEngine(config) {
-  const engine = new CardPoolEngine(config);
+function createCardPoolEngine(config, fuzzySearchFields) {
+  const engine = new CardPoolEngine(config, fuzzySearchFields);
   let initPromise = null;
   const useCardEngine = async () => {
     if (initPromise) return initPromise;
