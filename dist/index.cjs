@@ -843,19 +843,21 @@ var CardPoolEngine = class extends import_node_events2.EventEmitter {
     }
   }
 };
-function createCardPoolEngine(config, fuzzySearchFields) {
-  const engine = new CardPoolEngine(config, fuzzySearchFields);
-  let initPromise = null;
-  const useCardEngine = async () => {
-    if (initPromise) return initPromise;
-    initPromise = engine.init();
-    return initPromise;
+function createCardPoolEngine(config) {
+  return function(fuzzySearchFields) {
+    const engine = new CardPoolEngine(config, fuzzySearchFields);
+    let initPromise = null;
+    const useCardEngine = async () => {
+      if (initPromise) return initPromise;
+      initPromise = engine.init();
+      return initPromise;
+    };
+    const useCardPool = async () => {
+      const eng = await useCardEngine();
+      return eng.pool;
+    };
+    return { engine, useCardEngine, useCardPool };
   };
-  const useCardPool = async () => {
-    const eng = await useCardEngine();
-    return eng.pool;
-  };
-  return { engine, useCardEngine, useCardPool };
 }
 
 // src/CardEngine/InventoryEngine.ts

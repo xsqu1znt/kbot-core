@@ -205,7 +205,7 @@ declare class CardPoolEngine<Card extends CardLike, FuzzySearchFields extends Re
     release(cardIds: string[]): Promise<Card[]>;
     refresh(cardIds?: string[]): Promise<void>;
 }
-declare function createCardPoolEngine<Card extends CardLike, FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>>(config: CardPoolEngineConfig<Card>, fuzzySearchFields: FuzzySearchFields): {
+declare function createCardPoolEngine<Card extends CardLike>(config: CardPoolEngineConfig<Card>): <FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>>>(fuzzySearchFields: FuzzySearchFields) => {
     engine: CardPoolEngine<Card, FuzzySearchFields>;
     useCardEngine: () => Promise<CardPoolEngine<Card, FuzzySearchFields>>;
     useCardPool: () => Promise<CardPool<Card>>;

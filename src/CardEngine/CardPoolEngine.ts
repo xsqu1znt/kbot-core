@@ -462,23 +462,24 @@ export class CardPoolEngine<
     }
 }
 
-export function createCardPoolEngine<
-    Card extends CardLike,
-    FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>> = Record<string, FuzzySearchFieldGetter<Card>>
->(config: CardPoolEngineConfig<Card>, fuzzySearchFields: FuzzySearchFields) {
-    const engine = new CardPoolEngine<Card, FuzzySearchFields>(config, fuzzySearchFields);
-    let initPromise: Promise<CardPoolEngine<Card, FuzzySearchFields>> | null = null;
+export function createCardPoolEngine<Card extends CardLike>(config: CardPoolEngineConfig<Card>) {
+    return function <FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>>>(
+        fuzzySearchFields: FuzzySearchFields
+    ) {
+        const engine = new CardPoolEngine<Card, FuzzySearchFields>(config, fuzzySearchFields);
+        let initPromise: Promise<CardPoolEngine<Card, FuzzySearchFields>> | null = null;
 
-    const useCardEngine = async (): Promise<CardPoolEngine<Card, FuzzySearchFields>> => {
-        if (initPromise) return initPromise;
-        initPromise = engine.init();
-        return initPromise;
+        const useCardEngine = async () => {
+            if (initPromise) return initPromise;
+            initPromise = engine.init();
+            return initPromise;
+        };
+
+        const useCardPool = async (): Promise<CardPool<Card>> => {
+            const eng = await useCardEngine();
+            return eng.pool;
+        };
+
+        return { engine, useCardEngine, useCardPool };
     };
-
-    const useCardPool = async (): Promise<CardPool<Card>> => {
-        const eng = await useCardEngine();
-        return eng.pool;
-    };
-
-    return { engine, useCardEngine, useCardPool };
 }
