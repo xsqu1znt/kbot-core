@@ -79,7 +79,7 @@ export interface FuzzySearchOptions<
 > {
     limit?: number;
     released?: boolean;
-    excludeFields?: keyof FuzzySearchFields[];
+    excludeFields?: (keyof FuzzySearchFields)[];
 }
 
 export interface FuzzySearchIdentityResult {
@@ -163,19 +163,15 @@ export class CardPoolEngine<
 
     /** Fuzzy searches the card pool and returns a list of cards. */
     fuzzySearch(query: string, options: FuzzySearchOptions<Card, FuzzySearchFields> = {}): Card[] {
-        const { limit = 25, released, excludeFields: excludeIndexTypes } = options;
+        const { limit = 25, released, excludeFields } = options;
 
         const pool = this.cache.cardPool;
         const source = released ? pool.allReleased : pool.all;
         const lowerQuery = query.toLowerCase();
 
         const fieldGetters = Object.entries(this.fuzzySearchFields)
-            .filter(
-                ([name]) =>
-                    (excludeIndexTypes as unknown as string[])?.length &&
-                    !(excludeIndexTypes as unknown as string[]).includes(name)
-            )
-            .map(([, value]) => value);
+            .filter(([name]) => !excludeFields?.length || !excludeFields.includes(name))
+            .map(([, getter]) => getter);
 
         const results: Card[] = [];
         for (const card of source.values()) {

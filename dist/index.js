@@ -563,13 +563,11 @@ var CardPoolEngine = class extends EventEmitter2 {
   }
   /** Fuzzy searches the card pool and returns a list of cards. */
   fuzzySearch(query, options = {}) {
-    const { limit = 25, released, excludeFields: excludeIndexTypes } = options;
+    const { limit = 25, released, excludeFields } = options;
     const pool = this.cache.cardPool;
     const source = released ? pool.allReleased : pool.all;
     const lowerQuery = query.toLowerCase();
-    const fieldGetters = Object.entries(this.fuzzySearchFields).filter(
-      ([name]) => excludeIndexTypes?.length && !excludeIndexTypes.includes(name)
-    ).map(([, value]) => value);
+    const fieldGetters = Object.entries(this.fuzzySearchFields).filter(([name]) => !excludeFields?.length || !excludeFields.includes(name)).map(([, getter]) => getter);
     const results = [];
     for (const card of source.values()) {
       if (results.length >= limit) break;

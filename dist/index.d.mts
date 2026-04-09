@@ -150,7 +150,7 @@ type SampleResult<Card extends CardLike> = [cards: Card[], failReason?: string];
 interface FuzzySearchOptions<Card extends CardLike, FuzzySearchFields extends Record<string, FuzzySearchFieldGetter<Card>>> {
     limit?: number;
     released?: boolean;
-    excludeFields?: keyof FuzzySearchFields[];
+    excludeFields?: (keyof FuzzySearchFields)[];
 }
 interface FuzzySearchIdentityResult {
     /** Example: "aespa" or "Jaemin" */
