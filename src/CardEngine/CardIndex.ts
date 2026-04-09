@@ -4,11 +4,11 @@ import type { ICardIndex, KeyExtractor, Validator } from "@/types/cardIndex.type
 const EMPTY_SET: ReadonlySet<string> = new Set();
 const EMPTY_MAP: ReadonlyMap<any, any> = new Map();
 
-export class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
-    private readonly map = new Map<K, Set<string>>();
+export class CardIndex<T extends CardLike> implements ICardIndex<T> {
+    private readonly map = new Map<string | number, Set<string>>();
 
     constructor(
-        private readonly getKey: KeyExtractor<T, K>,
+        private readonly getKey: KeyExtractor<T, string | number>,
         private readonly validator?: Validator<T>
     ) {}
 
@@ -28,19 +28,19 @@ export class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
         this.map.get(key)?.delete(card.cardId);
     }
 
-    get(key: K): ReadonlySet<string> {
+    get(key: string | number): ReadonlySet<string> {
         return this.map.get(key) ?? EMPTY_SET;
     }
 
-    has(key: K): boolean {
+    has(key: string | number): boolean {
         return this.map.has(key);
     }
 
-    entries(): [K, ReadonlySet<string>][] {
+    entries(): [string | number, ReadonlySet<string>][] {
         return Array.from(this.map.entries());
     }
 
-    keys(): K[] {
+    keys(): (string | number)[] {
         return Array.from(this.map.keys());
     }
 

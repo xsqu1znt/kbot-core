@@ -45,17 +45,17 @@ interface ICardIndex<T> {
     clear(): void;
 }
 
-declare class CardIndex<T extends CardLike, K> implements ICardIndex<T> {
+declare class CardIndex<T extends CardLike> implements ICardIndex<T> {
     private readonly getKey;
     private readonly validator?;
     private readonly map;
-    constructor(getKey: KeyExtractor<T, K>, validator?: Validator<T> | undefined);
+    constructor(getKey: KeyExtractor<T, string | number>, validator?: Validator<T> | undefined);
     insert(card: T): void;
     remove(card: T): void;
-    get(key: K): ReadonlySet<string>;
-    has(key: K): boolean;
-    entries(): [K, ReadonlySet<string>][];
-    keys(): K[];
+    get(key: string | number): ReadonlySet<string>;
+    has(key: string | number): boolean;
+    entries(): [string | number, ReadonlySet<string>][];
+    keys(): (string | number)[];
     values(): ReadonlySet<string>[];
     clear(): void;
 }
@@ -75,7 +75,7 @@ declare class NestedCardIndex<T extends CardLike, K1, K2> implements ICardIndex<
 declare class CardPool<T extends CardLike> {
     readonly all: Map<string, T>;
     readonly allReleased: Map<string, T>;
-    readonly indices: Map<string, CardIndex<T, any>>;
+    readonly indices: Map<string, CardIndex<T>>;
     readonly nestedIndices: Map<string, NestedCardIndex<T, any, any>>;
     private readonly indexList;
     constructor(indexConfigs: IndexConfig<T, any>[], nestedIndexConfigs?: NestedIndexConfig<T, any, any>[]);
@@ -84,7 +84,7 @@ declare class CardPool<T extends CardLike> {
     get(cardId: string): T | undefined;
     has(cardId: string): boolean;
     clear(): void;
-    getIndex<K>(name: string): CardIndex<T, K> | undefined;
+    getIndex(name: string): CardIndex<T> | undefined;
     getNestedIndex<K1, K2>(name: string): NestedCardIndex<T, K1, K2> | undefined;
 }
 

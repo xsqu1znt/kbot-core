@@ -8,13 +8,13 @@ const defaultValidator = <T extends CardLike>(card: T): boolean => card.state.re
 export class CardPool<T extends CardLike> {
     readonly all = new Map<string, T>();
     readonly allReleased = new Map<string, T>();
-    readonly indices = new Map<string, CardIndex<T, any>>();
+    readonly indices = new Map<string, CardIndex<T>>();
     readonly nestedIndices = new Map<string, NestedCardIndex<T, any, any>>();
     private readonly indexList: ICardIndex<T>[] = [];
 
     constructor(indexConfigs: IndexConfig<T, any>[], nestedIndexConfigs?: NestedIndexConfig<T, any, any>[]) {
         for (const config of indexConfigs) {
-            const index = new CardIndex<T, any>(config.getKey, config.validator ?? defaultValidator);
+            const index = new CardIndex<T>(config.getKey, config.validator ?? defaultValidator);
             this.indices.set(config.name, index);
             this.indexList.push(index);
         }
@@ -69,7 +69,7 @@ export class CardPool<T extends CardLike> {
         }
     }
 
-    getIndex<K>(name: string): CardIndex<T, K> | undefined {
+    getIndex(name: string): CardIndex<T> | undefined {
         return this.indices.get(name);
     }
 

@@ -199,6 +199,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
             if (results.length >= limit) break;
             for (const [key, cardIds] of index.entries()) {
                 if (results.length >= limit) break;
+                if (typeof key !== "string") continue;
                 if (key.toLowerCase().startsWith(lowerQuery)) {
                     results.push({
                         key: String(key),
