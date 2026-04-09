@@ -876,6 +876,10 @@ var InventoryEngine = class {
     const mapped = await this.mapCards(invCards);
     return isArray ? mapped : mapped[0];
   }
+  async fetchAll() {
+    const invCards = await this.inventoryCardSchema.fetchAll();
+    return this.mapCards(invCards);
+  }
   /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
   async mapCards(invCards) {
     const cardEngine = await this.useCardEngine();

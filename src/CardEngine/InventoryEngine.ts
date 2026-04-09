@@ -46,6 +46,11 @@ export class InventoryEngine<Card extends CardLike, InvCard extends InventoryCar
         return isArray ? mapped : mapped[0];
     }
 
+    async fetchAll(): Promise<MappedInventoryCard<Card, InvCard>[]> {
+        const invCards = await this.inventoryCardSchema.fetchAll();
+        return this.mapCards(invCards);
+    }
+
     /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
     async mapCards(invCards: InvCard[]): Promise<MappedInventoryCard<Card, InvCard>[]> {
         const cardEngine = await this.useCardEngine();
