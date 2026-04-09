@@ -38,8 +38,10 @@ __export(index_exports, {
   CardPoolCache: () => CardPoolCache,
   CardPoolEngine: () => CardPoolEngine,
   ImageManager: () => ImageManager,
+  InventoryEngine: () => InventoryEngine,
   NestedCardIndex: () => NestedCardIndex,
   createCardPoolEngine: () => createCardPoolEngine,
+  createInventoryEngine: () => createInventoryEngine,
   useBunnyCDN: () => useBunnyCDN
 });
 module.exports = __toCommonJS(index_exports);
@@ -854,6 +856,37 @@ function createCardPoolEngine(config) {
   };
   return { engine, useCardEngine, useCardPool };
 }
+
+// src/CardEngine/InventoryEngine.ts
+var InventoryEngine = class {
+  useCardEngine;
+  inventoryCardSchema;
+  constructor(config) {
+    this.useCardEngine = config.useCardEngine;
+    this.inventoryCardSchema = config.inventoryCardSchema;
+  }
+  async fetch(cardIds, options = {}) {
+    const { userId } = options;
+    const isArray = Array.isArray(cardIds);
+    const cardIdsArray = isArray ? cardIds : [cardIds];
+    const invCards = await this.inventoryCardSchema.fetchAll({
+      ...userId && { userId },
+      invId: { $in: cardIdsArray }
+    });
+    const mapped = await this.mapCards(invCards);
+    return isArray ? mapped : mapped[0];
+  }
+  /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
+  async mapCards(invCards) {
+    const cardEngine = await this.useCardEngine();
+    return invCards.map((invCard) => ({ card: cardEngine.get(invCard.cardId), invCard })).filter(({ card }) => card);
+  }
+};
+function createInventoryEngine(config) {
+  const engine = new InventoryEngine(config);
+  const useInventoryEngine = () => engine;
+  return { engine, useInventoryEngine };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BunnyCDN,
@@ -864,8 +897,10 @@ function createCardPoolEngine(config) {
   CardPoolCache,
   CardPoolEngine,
   ImageManager,
+  InventoryEngine,
   NestedCardIndex,
   createCardPoolEngine,
+  createInventoryEngine,
   useBunnyCDN
 });
 //# sourceMappingURL=index.cjs.map

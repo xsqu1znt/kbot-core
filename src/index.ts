@@ -2,6 +2,7 @@ export * from "./CardEngine/CardIndex";
 export * from "./CardEngine/CardPool";
 export * from "./CardEngine/CardPoolCache";
 export * from "./CardEngine/CardPoolEngine";
+export * from "./CardEngine/InventoryEngine";
 export * from "./types/card.types";
 export * from "./types/cardIndex.types";
 export * from "./types/image.types";

@@ -223,6 +223,28 @@ declare function createCardPoolEngine<T extends CardLike>(config: CardPoolEngine
     useCardPool: () => Promise<CardPool<T>>;
 };
 
+interface FetchInventoryCardOptions {
+    userId?: string;
+}
+interface InventoryEngineConfig<Card extends CardLike, InvCard extends InventoryCardLike> {
+    useCardEngine: () => Promise<CardPoolEngine<Card>>;
+    inventoryCardSchema: MongoSchemaBuilder<InvCard>;
+}
+declare class InventoryEngine<Card extends CardLike, InvCard extends InventoryCardLike> {
+    private useCardEngine;
+    private inventoryCardSchema;
+    constructor(config: InventoryEngineConfig<Card, InvCard>);
+    /** Fetches an inventory card and maps it to its actual card. */
+    fetch(cardId: string, options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard> | undefined>;
+    fetch(cardIds: string | string[], options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard>[]>;
+    /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
+    mapCards(invCards: InvCard[]): Promise<MappedInventoryCard<Card, InvCard>[]>;
+}
+declare function createInventoryEngine<Card extends CardLike, InvCard extends InventoryCardLike>(config: InventoryEngineConfig<Card, InvCard>): {
+    engine: InventoryEngine<Card, InvCard>;
+    useInventoryEngine: () => InventoryEngine<Card, InvCard>;
+};
+
 interface MediaDimensions {
     width: number;
     height: number;
@@ -349,4 +371,4 @@ declare class ImageManager {
     static scaleBuffer(buffer: Buffer, factor: number): Promise<Buffer>;
 }
 
-export { BunnyCDN, type BunnyCDNOptions, type BunnyCDNRegion, type BunnyCDNUploadOptions, type BunnyCDN_Upload, CanvasUtils, CardGalleryRenderer, CardIndex, type CardLike, CardPool, CardPoolCache, CardPoolEngine, type CardPoolEngineConfig, type CardPoolEngineEvents, type CreateImageGalleryOptions, type FetchedImageWithSharp, type FuzzySearchIdentityResult, type FuzzySearchResult, type ICardIndex, ImageManager, type IndexConfig, type InsertNewCardData, type InventoryCardLike, type KeyExtractor, type MappedInventoryCard, type MediaDimensions, NestedCardIndex, type NestedIndexConfig, type RenderedMediaWithSharp, type SampleOptions, type SampleResult, type Validator, createCardPoolEngine, useBunnyCDN };
+export { BunnyCDN, type BunnyCDNOptions, type BunnyCDNRegion, type BunnyCDNUploadOptions, type BunnyCDN_Upload, CanvasUtils, CardGalleryRenderer, CardIndex, type CardLike, CardPool, CardPoolCache, CardPoolEngine, type CardPoolEngineConfig, type CardPoolEngineEvents, type CreateImageGalleryOptions, type FetchedImageWithSharp, type FuzzySearchIdentityResult, type FuzzySearchResult, type ICardIndex, ImageManager, type IndexConfig, type InsertNewCardData, type InventoryCardLike, InventoryEngine, type InventoryEngineConfig, type KeyExtractor, type MappedInventoryCard, type MediaDimensions, NestedCardIndex, type NestedIndexConfig, type RenderedMediaWithSharp, type SampleOptions, type SampleResult, type Validator, createCardPoolEngine, createInventoryEngine, useBunnyCDN };
