@@ -21,22 +21,19 @@ export class InventoryEngine<Card extends CardLike, InvCard extends InventoryCar
     }
 
     /** Fetches an inventory card and maps it to its actual card. */
+    async fetch(invId: string, options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard> | undefined>;
     async fetch(
-        cardId: string,
-        options?: FetchInventoryCardOptions
-    ): Promise<MappedInventoryCard<Card, InvCard> | undefined>;
-    async fetch(
-        cardIds: string | string[],
+        invIds: string | string[],
         options?: FetchInventoryCardOptions
     ): Promise<MappedInventoryCard<Card, InvCard>[]>;
     async fetch(
-        cardIds: string | string[],
+        invIds: string | string[],
         options: FetchInventoryCardOptions = {}
     ): Promise<(MappedInventoryCard<Card, InvCard> | undefined) | MappedInventoryCard<Card, InvCard>[]> {
         const { userId } = options;
 
-        const isArray = Array.isArray(cardIds);
-        const cardIdsArray = isArray ? cardIds : [cardIds];
+        const isArray = Array.isArray(invIds);
+        const cardIdsArray = isArray ? invIds : [invIds];
         const invCards = await this.inventoryCardSchema.fetchAll({
             ...(userId && { userId }),
             invId: { $in: cardIdsArray }
@@ -46,8 +43,10 @@ export class InventoryEngine<Card extends CardLike, InvCard extends InventoryCar
         return isArray ? mapped : mapped[0];
     }
 
-    async fetchAll(): Promise<MappedInventoryCard<Card, InvCard>[]> {
-        const invCards = await this.inventoryCardSchema.fetchAll();
+    async fetchAll(options: FetchInventoryCardOptions = {}): Promise<MappedInventoryCard<Card, InvCard>[]> {
+        const { userId } = options;
+
+        const invCards = await this.inventoryCardSchema.fetchAll({ ...(userId && { userId }) });
         return this.mapCards(invCards);
     }
 

@@ -235,9 +235,9 @@ declare class InventoryEngine<Card extends CardLike, InvCard extends InventoryCa
     private inventoryCardSchema;
     constructor(config: InventoryEngineConfig<Card, InvCard>);
     /** Fetches an inventory card and maps it to its actual card. */
-    fetch(cardId: string, options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard> | undefined>;
-    fetch(cardIds: string | string[], options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard>[]>;
-    fetchAll(): Promise<MappedInventoryCard<Card, InvCard>[]>;
+    fetch(invId: string, options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard> | undefined>;
+    fetch(invIds: string | string[], options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard>[]>;
+    fetchAll(options?: FetchInventoryCardOptions): Promise<MappedInventoryCard<Card, InvCard>[]>;
     /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
     mapCards(invCards: InvCard[]): Promise<MappedInventoryCard<Card, InvCard>[]>;
 }
