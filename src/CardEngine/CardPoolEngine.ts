@@ -193,7 +193,7 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
         const lowerQuery = query.toLowerCase();
         const limit = options?.limit ?? 25;
 
-        const results: Array<{ key: string; cardIds: string[]; nv: { name: string; value: string } }> = [];
+        const results: Array<{ key: string; identity: string; cardIds: string[]; nv: { name: string; value: string } }> = [];
 
         for (const [name, index] of pool.indices) {
             if (results.length >= limit) break;
@@ -201,10 +201,12 @@ export class CardPoolEngine<T extends CardLike> extends EventEmitter {
                 if (results.length >= limit) break;
                 if (typeof key !== "string") continue;
                 if (key.toLowerCase().startsWith(lowerQuery)) {
+                    const _cardIds = Array.from(cardIds);
                     results.push({
-                        key: String(key),
-                        cardIds: Array.from(cardIds),
-                        nv: { name: `[${name}] ${key}`, value: `${name}:${key}` }
+                        key,
+                        identity: `${name}:${key}`,
+                        cardIds: _cardIds,
+                        nv: { name: `[${name.replace("by", "")}] ${key}`, value: _cardIds.join(",") }
                     });
                 }
             }

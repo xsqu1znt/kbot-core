@@ -598,10 +598,12 @@ var CardPoolEngine = class extends EventEmitter2 {
         if (results.length >= limit) break;
         if (typeof key !== "string") continue;
         if (key.toLowerCase().startsWith(lowerQuery)) {
+          const _cardIds = Array.from(cardIds);
           results.push({
-            key: String(key),
-            cardIds: Array.from(cardIds),
-            nv: { name: `[${name}] ${key}`, value: `${name}:${key}` }
+            key,
+            identity: `${name}:${key}`,
+            cardIds: _cardIds,
+            nv: { name: `[${name.replace("by", "")}] ${key}`, value: _cardIds.join(",") }
           });
         }
       }
