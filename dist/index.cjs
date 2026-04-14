@@ -32,246 +32,64 @@ var index_exports = {};
 __export(index_exports, {
   BunnyCDN: () => BunnyCDN,
   CanvasUtils: () => CanvasUtils,
+  CardEngine: () => CardEngine,
   CardGalleryRenderer: () => CardGalleryRenderer,
   CardIndex: () => CardIndex,
   CardPool: () => CardPool,
-  CardPoolCache: () => CardPoolCache,
-  CardPoolEngine: () => CardPoolEngine,
   ImageManager: () => ImageManager,
   InventoryEngine: () => InventoryEngine,
   NestedCardIndex: () => NestedCardIndex,
-  createCardPoolEngine: () => createCardPoolEngine,
-  createInventoryEngine: () => createInventoryEngine,
+  createCardIndex: () => createCardIndex,
+  createNestedCardIndex: () => createNestedCardIndex,
+  createSearchField: () => createSearchField,
   useBunnyCDN: () => useBunnyCDN
 });
 module.exports = __toCommonJS(index_exports);
 
-// src/CardEngine/CardIndex.ts
-var EMPTY_SET = /* @__PURE__ */ new Set();
-var EMPTY_MAP = /* @__PURE__ */ new Map();
-var CardIndex = class {
-  constructor(getKey, validator) {
-    this.getKey = getKey;
-    this.validator = validator;
+// src/cards/InventoryEngine.ts
+var InventoryEngine = class {
+  constructor(config) {
+    this.config = config;
   }
-  map = /* @__PURE__ */ new Map();
-  insert(card) {
-    if (this.validator && !this.validator(card)) return;
-    const key = this.getKey(card);
-    if (key === void 0) return;
-    let bucket = this.map.get(key);
-    if (!bucket) this.map.set(key, bucket = /* @__PURE__ */ new Set());
-    bucket.add(card.cardId);
+  async fetch(invIds, options = {}) {
+    const { userId, projection } = options;
+    const isArray = Array.isArray(invIds);
+    const cardIdsArray = isArray ? invIds : [invIds];
+    const invCards = await this.config.inventorySchema.fetchAll(
+      {
+        ...userId && { userId },
+        invId: { $in: cardIdsArray }
+      },
+      projection
+    );
+    const mapped = await this.mapCards(invCards);
+    return isArray ? mapped : mapped[0];
   }
-  remove(card) {
-    const key = this.getKey(card);
-    if (key === void 0) return;
-    this.map.get(key)?.delete(card.cardId);
+  async fetchAll(options = {}) {
+    const { userId, projection } = options;
+    const invCards = await this.config.inventorySchema.fetchAll({ ...userId && { userId } }, projection);
+    return this.mapCards(invCards);
   }
-  get(key) {
-    return this.map.get(key) ?? EMPTY_SET;
-  }
-  has(key) {
-    return this.map.has(key);
-  }
-  entries() {
-    return Array.from(this.map.entries());
-  }
-  keys() {
-    return Array.from(this.map.keys());
-  }
-  values() {
-    return Array.from(this.map.values());
-  }
-  clear() {
-    this.map.clear();
-  }
-};
-var NestedCardIndex = class {
-  constructor(getKey1, getKey2, validator) {
-    this.getKey1 = getKey1;
-    this.getKey2 = getKey2;
-    this.validator = validator;
-  }
-  map = /* @__PURE__ */ new Map();
-  insert(card) {
-    if (this.validator && !this.validator(card)) return;
-    const k1 = this.getKey1(card);
-    const k2 = this.getKey2(card);
-    if (k1 === void 0 || k2 === void 0) return;
-    let outer = this.map.get(k1);
-    if (!outer) this.map.set(k1, outer = /* @__PURE__ */ new Map());
-    let bucket = outer.get(k2);
-    if (!bucket) outer.set(k2, bucket = /* @__PURE__ */ new Set());
-    bucket.add(card.cardId);
-  }
-  remove(card) {
-    const k1 = this.getKey1(card);
-    const k2 = this.getKey2(card);
-    if (k1 === void 0 || k2 === void 0) return;
-    this.map.get(k1)?.get(k2)?.delete(card.cardId);
-  }
-  get(key1, key2) {
-    if (key2 === void 0) return EMPTY_SET;
-    return this.map.get(key1)?.get(key2) ?? EMPTY_SET;
-  }
-  getOuter(key1) {
-    return this.map.get(key1) ?? EMPTY_MAP;
-  }
-  clear() {
-    this.map.clear();
+  /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
+  async mapCards(invCards) {
+    return (await Promise.all(
+      invCards.map(async (invCard) => ({ card: await this.config.cardEngine.get(invCard.cardId), invCard }))
+    )).filter(({ card }) => card);
   }
 };
 
-// src/CardEngine/CardPool.ts
-var defaultValidator = (card) => card.state.released && card.state.droppable;
-var CardPool = class {
-  all = /* @__PURE__ */ new Map();
-  allReleased = /* @__PURE__ */ new Map();
-  indices = /* @__PURE__ */ new Map();
-  nestedIndices = /* @__PURE__ */ new Map();
-  indexList = [];
-  constructor(indexConfigs, nestedIndexConfigs) {
-    for (const config of indexConfigs) {
-      const index = new CardIndex(config.getKey, config.validator ?? defaultValidator);
-      this.indices.set(config.name, index);
-      this.indexList.push(index);
-    }
-    if (nestedIndexConfigs) {
-      for (const config of nestedIndexConfigs) {
-        const index = new NestedCardIndex(
-          config.getKey1,
-          config.getKey2,
-          config.validator ?? defaultValidator
-        );
-        this.nestedIndices.set(config.name, index);
-        this.indexList.push(index);
-      }
-    }
-  }
-  insert(card) {
-    const existing = this.all.get(card.cardId);
-    if (existing) this.remove(existing);
-    this.all.set(card.cardId, card);
-    if (card.state.released) this.allReleased.set(card.cardId, card);
-    for (const index of this.indexList) {
-      index.insert(card);
-    }
-  }
-  remove(card) {
-    this.all.delete(card.cardId);
-    this.allReleased.delete(card.cardId);
-    for (const index of this.indexList) {
-      index.remove(card);
-    }
-  }
-  get(cardId) {
-    return this.all.get(cardId);
-  }
-  has(cardId) {
-    return this.all.has(cardId);
-  }
-  clear() {
-    this.all.clear();
-    this.allReleased.clear();
-    for (const index of this.indexList) {
-      index.clear();
-    }
-  }
-  getIndex(name) {
-    return this.indices.get(name);
-  }
-  getNestedIndex(name) {
-    return this.nestedIndices.get(name);
-  }
-};
+// src/cards/cardEngine.ts
+var import_node_stream2 = require("stream");
+var import_qznt3 = require("qznt");
 
-// src/CardEngine/CardPoolCache.ts
-var import_node_events = require("events");
-var CardPoolCache = class extends import_node_events.EventEmitter {
-  constructor(cardSchema, indexConfigs, nestedIndexConfigs) {
-    super();
-    this.cardSchema = cardSchema;
-    this.indexConfigs = indexConfigs;
-    this.nestedIndexConfigs = nestedIndexConfigs;
-  }
-  pool = null;
-  initPromise = null;
-  refreshQueue = Promise.resolve();
-  version = 0;
-  get cardPool() {
-    if (!this.pool) throw new Error("Card pool not initialized");
-    return this.pool;
-  }
-  async init() {
-    if (this.pool) return this;
-    if (!this.initPromise) {
-      this.initPromise = this.refreshAll().catch((err) => {
-        this.initPromise = null;
-        throw err;
-      });
-    }
-    await this.initPromise;
-    return this;
-  }
-  enqueue(fn) {
-    this.refreshQueue = this.refreshQueue.then(() => {
-      this.initPromise ?? Promise.resolve();
-    }).then(() => fn()).catch((err) => {
-      this.emit("error", err instanceof Error ? err : new Error(String(err)));
-      throw err;
-    });
-    return this.refreshQueue;
-  }
-  async fetchAndReplacePool() {
-    const myVersion = ++this.version;
-    const cards = await this.cardSchema.fetchAll();
-    if (myVersion !== this.version) return;
-    const pool = new CardPool(this.indexConfigs, this.nestedIndexConfigs);
-    for (const card of cards) pool.insert(card);
-    this.pool = pool;
-    this.emit("refreshed", cards.length);
-  }
-  async refreshAll() {
-    await this.enqueue(() => this.fetchAndReplacePool());
-  }
-  async refreshMany(cardIds) {
-    await this.enqueue(async () => {
-      if (!this.pool) return this.fetchAndReplacePool();
-      const cards = await this.cardSchema.fetchAll({ cardId: { $in: cardIds } });
-      for (const card of cards) {
-        const oldCard = this.pool.get(card.cardId);
-        this.pool.insert(card);
-        if (oldCard) {
-          this.emit("cardUpdated", card, oldCard);
-        } else {
-          this.emit("cardInserted", card);
-        }
-      }
-    });
-  }
-  async removeMany(cardIds) {
-    await this.enqueue(async () => {
-      if (!this.pool) return this.fetchAndReplacePool();
-      for (const cardId of cardIds) {
-        const existing = this.pool.get(cardId);
-        if (existing) {
-          this.pool.remove(existing);
-          this.emit("cardRemoved", existing);
-        }
-      }
-    });
-  }
-};
+// src/media/renderers/CardGalleryRenderer.ts
+var import_sharp2 = __toESM(require("sharp"), 1);
 
-// src/MediaTools/renderers/CardGalleryRenderer.ts
-var import_sharp2 = __toESM(require("sharp"));
-
-// src/MediaTools/utils/ImageUtils.ts
-var import_axios = __toESM(require("axios"));
+// src/media/utils/ImageUtils.ts
+var import_axios = __toESM(require("axios"), 1);
 var import_discord = require("discord.js");
 var import_qznt = require("qznt");
-var import_sharp = __toESM(require("sharp"));
+var import_sharp = __toESM(require("sharp"), 1);
 var ImageManager = class _ImageManager {
   static MAX_QUEUE_SIZE = 100;
   static queue = /* @__PURE__ */ new Map();
@@ -332,7 +150,7 @@ var ImageManager = class _ImageManager {
   }
 };
 
-// src/MediaTools/renderers/CardGalleryRenderer.ts
+// src/media/renderers/CardGalleryRenderer.ts
 var CardGalleryRenderer = class {
   cards = /* @__PURE__ */ new Map();
   cardBuffers = /* @__PURE__ */ new Map();
@@ -450,8 +268,8 @@ var CardGalleryRenderer = class {
   }
 };
 
-// src/MediaTools/utils/BunnyCDN.ts
-var import_axios2 = __toESM(require("axios"));
+// src/media/utils/BunnyCDN.ts
+var import_axios2 = __toESM(require("axios"), 1);
 var import_qznt2 = require("qznt");
 var BunnyCDN = class _BunnyCDN {
   static instance = null;
@@ -539,7 +357,7 @@ var BunnyCDN = class _BunnyCDN {
 };
 var useBunnyCDN = () => BunnyCDN.use();
 
-// src/MediaTools/utils/CanvasUtils.ts
+// src/media/utils/CanvasUtils.ts
 var import_canvas = require("@napi-rs/canvas");
 var CanvasUtils = class {
   static createTextBuffer(text, canvasWidth, canvasHeight, xPos, yPos, options = {}) {
@@ -555,16 +373,368 @@ var CanvasUtils = class {
   }
 };
 
-// src/CardEngine/CardPoolEngine.ts
-var import_node_events2 = require("events");
-var import_qznt3 = require("qznt");
-function buildCardFilename(namePrefix, imageUrl) {
-  const imageExt = imageUrl.split("?").shift()?.split(".").pop();
-  return `${namePrefix.toUpperCase()}_CARD_${Date.now()}${(0, import_qznt3.str)(2, "alpha", { casing: "upper" })}.${imageExt}`;
+// src/cards/cardPool.ts
+var import_node_stream = require("stream");
+var CardPool = class extends import_node_stream.EventEmitter {
+  constructor(cardSchema, indexes, nestedIndexes) {
+    super();
+    this.cardSchema = cardSchema;
+    this.indexes = new Map((indexes ?? []).map((index) => [index.name, index]));
+    this.nestedIndexes = new Map((nestedIndexes ?? []).map((index) => [index.name, index]));
+    this.indexRef = [...indexes ?? [], ...nestedIndexes ?? []];
+  }
+  // --- Indexes ---
+  all = /* @__PURE__ */ new Map();
+  allReleased = /* @__PURE__ */ new Map();
+  indexes = /* @__PURE__ */ new Map();
+  nestedIndexes = /* @__PURE__ */ new Map();
+  indexRef = [];
+  // --- Cache ---
+  initPromise = null;
+  queuePromise = Promise.resolve();
+  // --- Indexes ---
+  insert(cards) {
+    const inserted = [];
+    for (const card of cards) {
+      if (!card) continue;
+      const oldCard = this.all.get(card.cardId);
+      if (oldCard) {
+        this.all.delete(oldCard.cardId);
+        this.allReleased.delete(oldCard.cardId);
+        for (const index of this.indexRef) index.remove(oldCard);
+      }
+      this.all.set(card.cardId, card);
+      if (card.state.released) this.allReleased.set(card.cardId, card);
+      for (const index of this.indexRef) index.insert(card);
+      if (oldCard) {
+        this.emit("cardUpdated", oldCard, card);
+      } else {
+        this.emit("cardInserted", card);
+      }
+      inserted.push(card);
+    }
+    return inserted;
+  }
+  remove(cards) {
+    for (const card of cards) {
+      if (!card) continue;
+      this.all.delete(card.cardId);
+      this.allReleased.delete(card.cardId);
+      for (const index of this.indexRef) index.remove(card);
+      this.emit("cardRemoved", card);
+    }
+  }
+  async get(cardId, released) {
+    await this.initCache();
+    return released ? this.allReleased.get(cardId) : this.all.get(cardId);
+  }
+  async getMany(cardIds, released) {
+    await this.initCache();
+    return cardIds.map((id) => released ? this.allReleased.get(id) : this.all.get(id));
+  }
+  async has(cardId, released) {
+    await this.initCache();
+    return released ? this.allReleased.has(cardId) : this.all.has(cardId);
+  }
+  async hasAll(cardIds, released) {
+    await this.initCache();
+    return cardIds.every((id) => released ? this.allReleased.has(id) : this.all.has(id));
+  }
+  clear() {
+    this.all.clear();
+    this.allReleased.clear();
+    for (const index of this.indexRef) {
+      index.clear();
+    }
+  }
+  async getIndex(name) {
+    await this.initCache();
+    return this.indexes.get(name);
+  }
+  async getNestedIndex(name) {
+    await this.initCache();
+    return this.nestedIndexes.get(name);
+  }
+  // --- Cache ---
+  async initCache() {
+    if (this.initPromise) return this.initPromise;
+    const fn = async () => {
+      try {
+        this.clear();
+        this.indexRef = [];
+        const cards = await this.cardSchema.fetchAll();
+        this.insert(cards);
+        this.emit("cacheRefreshed", cards, "full");
+        this.emit("initialized");
+        return this;
+      } catch (err) {
+        this.initPromise = null;
+        console.error("[CardPool] Error initializing cache", err instanceof Error ? err.message : err);
+        return this;
+      }
+    };
+    this.initPromise = fn();
+    return await this.initPromise;
+  }
+  enqueue(fn) {
+    this.queuePromise = this.queuePromise.then(() => fn()).catch((err) => console.error("[CardPool] Error refreshing cache", err instanceof Error ? err.message : err));
+    return this.queuePromise;
+  }
+  async refresh(cardIds) {
+    await this.initCache();
+    await this.enqueue(async () => {
+      if (!cardIds?.length) this.clear();
+      const cards = cardIds?.length ? await this.cardSchema.fetchAll({ cardId: { $in: cardIds } }) : await this.cardSchema.fetchAll();
+      this.insert(cards);
+      this.emit("cacheRefreshed", cards, cardIds?.length ? "partial" : "full");
+    });
+  }
+};
+
+// src/cards/cardEngine.ts
+var CardEngine = class extends import_node_stream2.EventEmitter {
+  constructor(config) {
+    super();
+    this.config = config;
+    this.pool = new CardPool(config.schemas.card, config.indexes, config.nestedIndexes);
+    this.compiledSampleRates = compileWeightPool(config.cardSampleRates);
+    this.pool.on("initialized", () => this.emit("initialized"));
+    this.pool.on("cardInserted", (card) => this.emit("cardInserted", card));
+    this.pool.on("cardRemoved", (card) => this.emit("cardRemoved", card));
+    this.pool.on("cardUpdated", (oldCard, newCard) => this.emit("cardUpdated", oldCard, newCard));
+    this.pool.on("cacheRefreshed", (cards, scope) => this.emit("cacheRefreshed", cards, scope));
+  }
+  pool;
+  compiledSampleRates;
+  // --- Pool Utils ---
+  /** Gets a card from the pool. */
+  async get(cardId, released) {
+    return await this.pool.get(cardId, released);
+  }
+  /** Gets many cards from the pool and sorts them. */
+  async getMany(cardIds, released) {
+    const results = await this.pool.getMany(cardIds, released);
+    return this.sort(results.filter((c) => !!c));
+  }
+  /** Checks if a card is in the pool. */
+  async has(cardId, released) {
+    return await this.pool.has(cardId, released);
+  }
+  /** Checks if all cards are in the pool. */
+  async hasAll(cardIds, released) {
+    return await this.pool.hasAll(cardIds, released);
+  }
+  /** Refreshes the card pool. */
+  async refresh(cardIds) {
+    return await this.pool.refresh(cardIds);
+  }
+  // --- Card Utils ---
+  /** Sorts an array of cards. Non-destructive. */
+  sort(cards) {
+    return structuredClone(cards).sort(this.config.sortFn);
+  }
+  // --- CRUD ---
+  /** Fuzzy searches the card pool using the configured search fields and sorts the results. Case-insensitive. */
+  search(query, options = {}) {
+    const { limit = 25, released = true, excludeSearchFields = [], exclude } = options;
+    query = query.toLowerCase();
+    const source = Array.from((released ? this.pool.allReleased : this.pool.all).values()).filter(
+      (card) => !exclude?.(card)
+    );
+    if (!source.length) {
+      if (!exclude) console.warn(`[CardEngine] Search failed for '${query}'; the card pool is empty`);
+      return [];
+    }
+    const searchFields = Object.entries(this.config.searchFields ?? []).filter(([name]) => !excludeSearchFields.length || !excludeSearchFields.includes(name)).map(([, getter]) => getter);
+    if (!searchFields.length) {
+      console.warn(`[CardEngine] Search failed for '${query}'; no search fields are configured`);
+      return [];
+    }
+    const results = [];
+    for (const card of source) {
+      if (results.length >= limit) break;
+      for (const field of searchFields) {
+        const matchedKey = field.getKey(card);
+        if (matchedKey === void 0) continue;
+        if (typeof matchedKey === "string" && matchedKey.toLowerCase().includes(query)) {
+          results.push(card);
+          break;
+        }
+        if (field.transformer) {
+          const transformed = field.transformer(query);
+          if (typeof matchedKey === "number" && matchedKey.toString() === query) {
+            results.push(card);
+            break;
+          } else if (typeof matchedKey === "boolean" && matchedKey === transformed) {
+            results.push(card);
+            break;
+          }
+        }
+      }
+    }
+    return this.sort(results);
+  }
+  /** Fuzzy searches the card pool by the configured indexes. Does not query nested indexes. Case-insensitive. */
+  searchByIndex(query, options = {}) {
+    const { limit = 25, released = true, exclude } = options;
+    query = query.toLowerCase();
+    const source = Array.from((released ? this.pool.allReleased : this.pool.all).values()).filter(
+      (card) => !exclude?.(card)
+    );
+    if (!source.length) {
+      if (!exclude) console.warn(`[CardEngine] Search failed for '${query}'; the card pool is empty`);
+      return [];
+    }
+    const results = [];
+    for (const index of this.pool.indexes.values()) {
+      if (results.length >= limit) break;
+      for (const [indexKey, cardIdSet] of index.entries()) {
+        if (typeof indexKey !== "string") continue;
+        if (indexKey.toLowerCase().startsWith(query)) {
+          results.push({
+            matchedKey: indexKey,
+            indexName: index.name,
+            identity: `${index.name}-${indexKey}`,
+            cardIds: Array.from(cardIdSet)
+          });
+        }
+      }
+    }
+    return results;
+  }
+  /** Samples a number of cards from the card pool. */
+  async sample(limit, options = {}) {
+    const { excludeCards = [] } = options;
+    const picked = new Set(excludeCards);
+    const results = [];
+    for (let i = 0; i < limit; i++) {
+      const selectedType = import_qznt3.$.rnd.weighted(this.compiledSampleRates, (t) => t.compiledWeight);
+      let selectedRarity;
+      if (selectedType.rarities) {
+        selectedRarity = import_qznt3.$.rnd.weighted(selectedType.rarities, (r) => r.compiledWeight).rarity;
+      }
+      let candidates;
+      if (selectedRarity !== void 0) {
+        candidates = new Set(this.config.cardSampleNestedIndex.get(selectedType.type, selectedRarity));
+        if (!candidates?.size) {
+          console.warn(
+            `[CardEngine] Sample failed; no cards found for type '${selectedType.type}' and rarity '${selectedRarity}'`
+          );
+        }
+      } else {
+        candidates = new Set(this.config.cardSampleIndex.get(selectedType.type));
+        if (!candidates?.size) {
+          console.warn(`[CardEngine] Sample failed; no cards found for type '${selectedType.type}'`);
+        }
+      }
+      const availableCandidates = Array.from(candidates).filter((id) => !picked.has(id));
+      if (!availableCandidates.length) {
+        console.warn("[CardEngine] Sample failed; not enough cards available");
+        return [];
+      }
+      const cardId = import_qznt3.$.rnd.choice(availableCandidates);
+      picked.add(cardId);
+      results.push(await this.pool.get(cardId));
+    }
+    return results;
+  }
+  /** Samples a number of cards from the card pool and updates them, returning the modified cards. */
+  async sampleAndUpdate(limit, update, options) {
+    const cards = await this.sample(limit, options);
+    return await this.update(
+      cards.map((c) => c.cardId),
+      update
+    );
+  }
+  /** Creates a new card in the database and uploads its image to the CDN. */
+  async insert(data, stageFns) {
+    const existing = await this.pool.get(data.card.cardId);
+    if (existing) throw new Error(`[CardEngine] Card '${data.card.cardId}' already exists`);
+    if (!data.imageUrl) throw new Error(`[CardEngine] Card '${data.card.cardId}' must have an image URL`);
+    const bunnyCDN = useBunnyCDN();
+    await stageFns?.[0]();
+    const imageResult = await bunnyCDN.uploadImageFromUrl(
+      data.imageUrl,
+      buildCardFilename(data.prefix, data.imageUrl),
+      data.cdnRoute
+    );
+    if (!imageResult.success) throw new Error("Failed to upload card image");
+    await stageFns?.[1]();
+    const [card] = await this.config.schemas.card.create([
+      { ...data.card, asset: { imageUrl: imageResult.cdnUrl, cdn: { filePath: imageResult.path } } }
+    ]);
+    if (!card) throw new Error("Failed to insert card into database");
+    await stageFns?.[2]();
+    await this.pool.refresh([card.cardId]);
+    return card;
+  }
+  /** Removes a card from the database and CDN, and clears it from player inventories. */
+  async remove(cardIds) {
+    await Promise.all(
+      cardIds.map(async (cardId) => {
+        const existing = await this.pool.get(cardId);
+        if (!existing) return false;
+        try {
+          const bunnyCDN = useBunnyCDN();
+          await bunnyCDN.delete(existing.asset.cdn.filePath);
+          await this.config.schemas.card.delete({ cardId });
+          this.pool.remove([existing]);
+          await this.config.schemas.inventory.deleteAll({ cardId });
+        } catch (err) {
+          console.warn(`[CardEngine] Failed to delete card '${cardId}'`, err);
+        }
+      })
+    );
+  }
+  /** Updates multiple cards in the database. Supports atomic operators e.g. $inc. */
+  async update(cardIds, update) {
+    const updateRes = await this.config.schemas.card.updateAll({ cardId: { $in: cardIds } }, update);
+    if (updateRes.modifiedCount !== cardIds.length) {
+      console.warn(
+        `[CardEngine] Issue updating: out of '${cardIds.join(", ")}' only ${updateRes.modifiedCount} updated`
+      );
+    }
+    const updated = await this.config.schemas.card.fetchAll({ cardId: { $in: cardIds } });
+    if (updated.length !== cardIds.length) {
+      console.warn(`[CardEngine] Issue updating: out of '${cardIds.join(", ")}' only ${updated.length} were found`);
+    }
+    return this.pool.insert(updated);
+  }
+  /** Swaps the image of a card in the database. */
+  async swapImage(cardId, newImageUrl, options) {
+    const oldCard = await this.get(cardId);
+    if (!oldCard) return null;
+    const bunnyCDN = useBunnyCDN();
+    const imageResult = await bunnyCDN.uploadImageFromUrl(
+      newImageUrl,
+      buildCardFilename(options.prefix, newImageUrl),
+      options.cdnRoute
+    );
+    if (!imageResult.success) return null;
+    await bunnyCDN.delete(oldCard.asset.cdn.filePath);
+    const updated = await this.config.schemas.card.update(
+      { cardId },
+      { "asset.imageUrl": imageResult.cdnUrl, "asset.cdn.filePath": imageResult.path },
+      { returnDocument: "after" }
+    );
+    if (!updated) return null;
+    this.pool.insert([updated]);
+    return updated;
+  }
+  /** Releases a batch of cards and updates the cache. */
+  async release(cardIds) {
+    await this.config.schemas.card.updateAll({ cardId: { $in: cardIds } }, { "state.released": true });
+    await this.pool.refresh(cardIds);
+    return await this.getMany(cardIds, true);
+  }
+};
+function buildCardFilename(prefix, imageUrl) {
+  const fileExt = imageUrl.split("?").shift()?.split(".").pop();
+  return `${prefix.toUpperCase()}_CARD_${Date.now()}${import_qznt3.$.rnd.str(2, "alpha", { casing: "upper" })}.${fileExt}`;
 }
-function compileWeightPool(dropRates) {
-  const totalRawBaseWeight = dropRates.tiers.reduce((acc, cur) => acc + 1 / cur.oneIn, 0);
-  return dropRates.tiers.map((tier) => {
+function compileWeightPool(sampleRates) {
+  const totalRawBaseWeight = sampleRates.reduce((acc, cur) => acc + 1 / cur.oneIn, 0);
+  return sampleRates.map((tier) => {
     const compiled = {
       type: tier.type,
       oneIn: tier.oneIn,
@@ -581,337 +751,107 @@ function compileWeightPool(dropRates) {
     return compiled;
   });
 }
-var CardPoolEngine = class extends import_node_events2.EventEmitter {
-  constructor(config, fuzzySearchFields) {
-    super();
-    this.config = config;
-    this.fuzzySearchFields = fuzzySearchFields;
-    this.cache = new CardPoolCache(config.cardSchema, config.indices, config.nestedIndices);
-    this.compiledDropRates = compileWeightPool(config.dropRates);
-    this.cache.on("refreshed", (count) => this.emit("refreshed", count));
-    this.cache.on("cardInserted", (card) => this.emit("cardInserted", card));
-    this.cache.on("cardRemoved", (card) => this.emit("cardRemoved", card));
-    this.cache.on("cardUpdated", (card, oldCard) => this.emit("cardUpdated", card, oldCard));
-    this.cache.on("error", (err) => this.emit("error", err));
-  }
-  cache;
-  compiledDropRates;
-  initialized = false;
-  get pool() {
-    return this.cache.cardPool;
-  }
-  async init() {
-    await this.cache.init();
-    this.initialized = true;
-    this.emit("initialized");
-    return this;
-  }
-  async ensureInit() {
-    if (!this.initialized) await this.init();
-  }
-  /** Fuzzy searches the card pool and returns a list of cards. */
-  fuzzySearch(query, options = {}) {
-    const { limit = 25, released, excludeFields } = options;
-    const pool = this.cache.cardPool;
-    const source = released ? pool.allReleased : pool.all;
-    const lowerQuery = query.toLowerCase();
-    const fieldGetters = Object.entries(this.fuzzySearchFields).filter(([name]) => !excludeFields?.length || !excludeFields.includes(name)).map(([, getter]) => getter);
-    const results = [];
-    for (const card of source.values()) {
-      if (results.length >= limit) break;
-      for (const getter of fieldGetters) {
-        const match = getter(card);
-        if (match === void 0) continue;
-        if (typeof match === "string" && match.startsWith(lowerQuery)) {
-          results.push(card);
-          break;
-        } else if (typeof match === "number" && match.toString() === lowerQuery) {
-          results.push(card);
-          break;
-        }
-      }
-    }
-    return results;
-  }
-  /** Fuzzy searches the card pool and returns a list of cards by their identifiers.. */
-  fuzzySearchIdentity(query, options = {}) {
-    const { limit = 25 } = options;
-    const pool = this.cache.cardPool;
-    const lowerQuery = query.toLowerCase();
-    const results = [];
-    for (const [indexType, index] of pool.indices) {
-      if (results.length >= limit) break;
-      for (const [matchedKey, cardIds] of index.entries()) {
-        if (results.length >= limit) break;
-        if (typeof matchedKey !== "string") continue;
-        if (matchedKey.toLowerCase().startsWith(lowerQuery)) {
-          const _cardIds = Array.from(cardIds);
-          const _indexTypeStripped = indexType.replace("by", "");
-          const _identity = `${indexType}-${matchedKey}`;
-          results.push({
-            matchedKey,
-            indexType,
-            indexTypeStripped: _indexTypeStripped,
-            identity: _identity,
-            cardIds: _cardIds
-          });
-        }
-      }
-    }
-    return results;
-  }
-  /** Gets a card from the card pool. */
-  get(cardId, released) {
-    const pool = this.cache.cardPool;
-    return released ? pool.allReleased.get(cardId) : pool.all.get(cardId);
-  }
-  getMany(cardIds, released) {
-    const pool = this.cache.cardPool;
-    const results = [];
-    for (const cardId of cardIds) {
-      const card = released ? pool.allReleased.get(cardId) : pool.all.get(cardId);
-      if (card) results.push(card);
-    }
-    return this.sort(results);
-  }
-  /** Samples a number of cards from the card pool. */
-  sample(limit, options) {
-    const pool = this.cache.cardPool;
-    const picked = new Set(options?.excludeCardIds);
-    const results = [];
-    for (let i = 0; i < limit; i++) {
-      const selectedType = (0, import_qznt3.weighted)(this.compiledDropRates, (t) => t.compiledWeight);
-      let selectedRarity;
-      if (selectedType.rarities) {
-        selectedRarity = (0, import_qznt3.weighted)(selectedType.rarities, (r) => r.compiledWeight).rarity;
-      }
-      let candidates;
-      for (const [, nestedIndex] of pool.nestedIndices) {
-        if (nestedIndex instanceof NestedCardIndex) {
-          const found = nestedIndex.get(selectedType.type, selectedRarity);
-          if (found.size) {
-            candidates = new Set(found);
-            break;
-          }
-        }
-      }
-      if (!candidates?.size) {
-        for (const [, index] of pool.indices) {
-          if (index instanceof CardIndex) {
-            const found = index.get(selectedType.type);
-            if (found.size) {
-              candidates = new Set(found);
-              break;
-            }
-          }
-        }
-      }
-      if (!candidates?.size) candidates = new Set(pool.all.keys());
-      const available = Array.from(candidates).filter((id) => !picked.has(id));
-      if (!available.length) return [[], "Not enough cards were available to drop."];
-      const cardId = (0, import_qznt3.choice)(available);
-      picked.add(cardId);
-      results.push(pool.all.get(cardId));
-    }
-    return [results];
-  }
-  /** Samples a number of cards from the card pool and modifies them, then returns the modified cards. */
-  async sampleAndModify(limit, update, options) {
-    const [cards, failReason] = this.sample(limit, options);
-    if (failReason) return [[], failReason];
-    const modifiedCards = await this.modifyMany(
-      cards.map((c) => c.cardId),
-      update
-    );
-    if (!modifiedCards.length) return [[], "Failed to modify cards."];
-    return [modifiedCards];
-  }
-  /** Sorts a list of cards by an opinionated order. */
-  sort(cards) {
-    return [...cards].sort(this.config.sortFn);
-  }
-  /** Creates a new card in the database and uploads its image to the CDN. */
-  async insert(data, stageFns) {
-    await this.ensureInit();
-    const existing = this.pool.get(data.card.cardId);
-    if (existing) throw new Error(`Card (${data.card.cardId}) already exists`);
-    if (!data.imageUrl) throw new Error("Card must have an image URL");
-    const bunnyCDN = useBunnyCDN();
-    await stageFns?.[0]();
-    const imageResult = await bunnyCDN.uploadImageFromUrl(
-      data.imageUrl,
-      buildCardFilename(data.namePrefix, data.imageUrl),
-      data.cdnRoute
-    );
-    if (!imageResult.success) throw new Error("Failed to upload card image");
-    await stageFns?.[1]();
-    const [card] = await this.config.cardSchema.create([
-      { ...data.card, asset: { imageUrl: imageResult.cdnUrl, cdn: { filePath: imageResult.path } } }
-    ]);
-    if (!card) throw new Error("Failed to insert card into database");
-    await stageFns?.[2]();
-    await this.cache.refreshMany([card.cardId]);
-    return card;
-  }
-  /** Modifies a card in the database. Supports atomic operators e.g. $inc. */
-  async modify(cardId, update) {
-    await this.ensureInit();
-    const oldCard = this.pool.get(cardId);
-    if (!oldCard) return null;
-    const updated = await this.config.cardSchema.update({ cardId }, update, { returnDocument: "after" });
-    if (!updated) return null;
-    this.pool.insert(updated);
-    this.emit("cardUpdated", updated, oldCard);
-    return updated;
-  }
-  /** Modifies multiple cards in the database. Supports atomic operators e.g. $inc. */
-  async modifyMany(cardIds, update) {
-    await this.ensureInit();
-    const oldCards = cardIds.map((id) => this.pool.get(id));
-    if (oldCards.length !== cardIds.length) return [];
-    const updateRes = await this.config.cardSchema.updateAll({ cardId: { $in: cardIds } }, update);
-    if (updateRes.modifiedCount !== cardIds.length) return [];
-    const updated = await this.config.cardSchema.fetchAll({ cardId: { $in: cardIds } });
-    if (updated.length !== cardIds.length) return [];
-    updated.forEach((card) => {
-      this.pool.insert(card);
-      this.emit(
-        "cardUpdated",
-        card,
-        oldCards.find((c) => c?.cardId === card.cardId)
-      );
-    });
-    return updated;
-  }
-  /** Removes a card from the database and CDN, and clears it from player inventories. */
-  async delete(cardId) {
-    await this.ensureInit();
-    const existing = this.pool.get(cardId);
-    if (!existing) return false;
-    try {
-      const bunnyCDN = useBunnyCDN();
-      await bunnyCDN.delete(existing.asset.cdn.filePath);
-      await this.config.cardSchema.delete({ cardId });
-      await this.cache.removeMany([cardId]);
-      await this.config.inventoryCardSchema.deleteAll({ cardId });
-      return true;
-    } catch (err) {
-      console.error("Failed to delete card", err);
-      return false;
-    }
-  }
-  /** Swaps the image of a card in the database. */
-  async swapImage(cardId, newImageUrl, options) {
-    await this.ensureInit();
-    const oldCard = this.get(cardId);
-    if (!oldCard) return null;
-    const bunnyCDN = useBunnyCDN();
-    const imageResult = await bunnyCDN.uploadImageFromUrl(
-      newImageUrl,
-      buildCardFilename(options.namePrefix, newImageUrl),
-      options.cdnRoute
-    );
-    if (!imageResult.success) return null;
-    await bunnyCDN.delete(oldCard.asset.cdn.filePath);
-    const updated = await this.config.cardSchema.update(
-      { cardId },
-      { "asset.imageUrl": imageResult.cdnUrl, "asset.cdn.filePath": imageResult.path },
-      { returnDocument: "after" }
-    );
-    if (!updated) return null;
-    this.pool.insert(updated);
-    this.emit("cardUpdated", updated, oldCard);
-    return updated;
-  }
-  /** Releases a batch of cards and updates the cache. */
-  async release(cardIds) {
-    await this.ensureInit();
-    const oldCards = this.getMany(cardIds);
-    await this.config.cardSchema.updateAll({ cardId: { $in: cardIds } }, { "state.released": true });
-    await this.cache.refreshMany(cardIds);
-    const updated = this.getMany(cardIds, true);
-    for (let i = 0; i < updated.length; i++) {
-      this.emit("cardUpdated", updated[i], oldCards[i]);
-    }
-    return updated;
-  }
-  async refresh(cardIds) {
-    if (cardIds) {
-      await this.cache.refreshMany(cardIds);
-    } else {
-      await this.cache.refreshAll();
-    }
-  }
-};
-function createCardPoolEngine(config) {
-  return function(fuzzySearchFields) {
-    const engine = new CardPoolEngine(config, fuzzySearchFields);
-    let initPromise = null;
-    const useCardEngine = async () => {
-      if (initPromise) return initPromise;
-      initPromise = engine.init();
-      return initPromise;
-    };
-    const useCardPool = async () => {
-      const eng = await useCardEngine();
-      return eng.pool;
-    };
-    return { engine, useCardEngine, useCardPool };
-  };
+function createSearchField(name, getKey, transformer) {
+  return { name, getKey, transformer };
 }
 
-// src/CardEngine/InventoryEngine.ts
-var InventoryEngine = class {
-  useCardEngine;
-  inventoryCardSchema;
-  constructor(config) {
-    this.useCardEngine = config.useCardEngine;
-    this.inventoryCardSchema = config.inventoryCardSchema;
+// src/cards/cardIndex.ts
+var CardIndex = class {
+  constructor(name, getKey, validator) {
+    this.name = name;
+    this.getKey = getKey;
+    this.validator = validator;
   }
-  async fetch(invIds, options = {}) {
-    const { userId, projection } = options;
-    const isArray = Array.isArray(invIds);
-    const cardIdsArray = isArray ? invIds : [invIds];
-    const invCards = await this.inventoryCardSchema.fetchAll(
-      {
-        ...userId && { userId },
-        invId: { $in: cardIdsArray }
-      },
-      projection
-    );
-    const mapped = await this.mapCards(invCards);
-    return isArray ? mapped : mapped[0];
+  items = /* @__PURE__ */ new Map();
+  insert(card) {
+    if (!this.validator(card)) return;
+    const key = this.getKey(card);
+    if (key === void 0) return;
+    const bucket = this.items.get(key) ?? /* @__PURE__ */ new Set();
+    bucket.add(card.cardId);
+    this.items.set(key, bucket);
   }
-  async fetchAll(options = {}) {
-    const { userId, projection } = options;
-    const invCards = await this.inventoryCardSchema.fetchAll({ ...userId && { userId } }, projection);
-    return this.mapCards(invCards);
+  remove(card) {
+    const key = this.getKey(card);
+    if (!key) return;
+    this.items.get(key)?.delete(card.cardId);
   }
-  /** Maps inventory cards to their actual card, filtering out cards that don't exist. */
-  async mapCards(invCards) {
-    const cardEngine = await this.useCardEngine();
-    return invCards.map((invCard) => ({ card: cardEngine.get(invCard.cardId), invCard })).filter(({ card }) => card);
+  get(key) {
+    return this.items.get(key) ?? /* @__PURE__ */ new Set();
+  }
+  has(key) {
+    return this.items.has(key);
+  }
+  clear() {
+    this.items.clear();
+  }
+  entries() {
+    return Array.from(this.items.entries());
+  }
+  keys() {
+    return Array.from(this.items.keys());
+  }
+  values() {
+    return Array.from(this.items.values());
   }
 };
-function createInventoryEngine(config) {
-  const engine = new InventoryEngine(config);
-  const useInventoryEngine = () => engine;
-  return { engine, useInventoryEngine };
+var NestedCardIndex = class {
+  constructor(name, getKey1, getKey2, validator) {
+    this.name = name;
+    this.getKey1 = getKey1;
+    this.getKey2 = getKey2;
+    this.validator = validator;
+  }
+  items = /* @__PURE__ */ new Map();
+  insert(card) {
+    if (!this.validator(card)) return;
+    const k1 = this.getKey1(card);
+    const k2 = this.getKey2(card);
+    if (k1 === void 0 || k2 === void 0) return;
+    const outer = this.items.get(k1) ?? /* @__PURE__ */ new Map();
+    if (!outer) this.items.set(k1, outer);
+    const bucket = outer.get(k2) ?? /* @__PURE__ */ new Set();
+    bucket.add(card.cardId);
+    this.items.set(k1, bucket);
+  }
+  remove(card) {
+    const k1 = this.getKey1(card);
+    const k2 = this.getKey2(card);
+    if (k1 === void 0 || k2 === void 0) return;
+    this.items.get(k1)?.get(k2)?.delete(card.cardId);
+  }
+  get(k1, k2) {
+    if (k2 === void 0) return /* @__PURE__ */ new Set();
+    return this.items.get(k1)?.get(k2) ?? /* @__PURE__ */ new Set();
+  }
+  clear() {
+    this.items.clear();
+  }
+};
+var DEFAULT_VALIDATOR = (card) => card.state.released && card.state.droppable;
+function createCardIndex(name, getKey, validator) {
+  return new CardIndex(name, getKey, validator ?? DEFAULT_VALIDATOR);
 }
+function createNestedCardIndex(name, getKey1, getKey2, validator) {
+  return new NestedCardIndex(name, getKey1, getKey2, validator ?? DEFAULT_VALIDATOR);
+}
+
+// src/types/image.types.ts
+var import_discord2 = require("discord.js");
+var import_sharp3 = require("sharp");
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BunnyCDN,
   CanvasUtils,
+  CardEngine,
   CardGalleryRenderer,
   CardIndex,
   CardPool,
-  CardPoolCache,
-  CardPoolEngine,
   ImageManager,
   InventoryEngine,
   NestedCardIndex,
-  createCardPoolEngine,
-  createInventoryEngine,
+  createCardIndex,
+  createNestedCardIndex,
+  createSearchField,
   useBunnyCDN
 });
-//# sourceMappingURL=index.cjs.map

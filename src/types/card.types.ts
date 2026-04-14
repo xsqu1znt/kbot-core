@@ -12,10 +12,7 @@ export interface InventoryCardLike {
     cardId: string;
 }
 
-export interface MappedInventoryCard<
-    Card extends CardLike = CardLike,
-    InvCard extends InventoryCardLike = InventoryCardLike
-> {
-    card: Card;
-    invCard: InvCard;
+export interface MappedInventoryCard<T1 extends CardLike, T2 extends InventoryCardLike> {
+    card: T1;
+    invCard: T2;
 }

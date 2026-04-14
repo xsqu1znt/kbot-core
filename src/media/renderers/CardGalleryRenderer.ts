@@ -1,6 +1,7 @@
-import { CardLike } from "@/types/card.types";
+import type { CardLike } from "@/types/card.types.js";
+
 import sharp from "sharp";
-import { ImageManager } from "../utils/ImageUtils";
+import { ImageManager } from "../utils/ImageUtils.js";
 
 interface RenderOptions {
     rowLength?: number;

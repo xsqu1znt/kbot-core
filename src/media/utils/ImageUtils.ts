@@ -1,8 +1,9 @@
+import type { FetchedImageWithSharp, MediaDimensions, RenderedMediaWithSharp } from "@/types/image.types.js";
+
 import axios from "axios";
 import { AttachmentBuilder } from "discord.js";
 import { memory } from "qznt";
 import sharp from "sharp";
-import { FetchedImageWithSharp, MediaDimensions, RenderedMediaWithSharp } from "../../types/image.types";
 
 export interface CreateImageGalleryOptions {
     /** Leave blank to use the size of the largest image. */
