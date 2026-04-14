@@ -46,16 +46,16 @@ declare class CardIndex<T extends CardLike, K extends string | number = string |
     keys(): K[];
     values(): ReadonlySet<string>[];
 }
-declare class NestedCardIndex<T extends CardLike, K extends string | number = string | number> {
+declare class NestedCardIndex<T extends CardLike, K1 extends string | number = string | number, K2 extends string | number = string | number> {
     readonly name: string;
     private readonly getKey1;
     private readonly getKey2;
     private readonly validator;
     private readonly items;
-    constructor(name: string, getKey1: KeyGetter<T, K>, getKey2: KeyGetter<T, K>, validator: Validator<T>);
+    constructor(name: string, getKey1: KeyGetter<T, K1>, getKey2: KeyGetter<T, K2>, validator: Validator<T>);
     insert(card: T): void;
     remove(card: T): void;
-    get(k1: K, k2: K | undefined): ReadonlySet<string>;
+    get(k1: K1, k2: K2 | undefined): ReadonlySet<string>;
     clear(): void;
 }
 declare function createCardIndex<T extends CardLike, K extends string | number>(name: string, getKey: KeyGetter<T, K>, 
@@ -77,7 +77,7 @@ declare class CardPool<T extends CardLike, K extends string | number = string | 
     readonly all: Map<string, T>;
     readonly allReleased: Map<string, T>;
     readonly indexes: Map<string, CardIndex<T, K>>;
-    readonly nestedIndexes: Map<string, NestedCardIndex<T, K>>;
+    readonly nestedIndexes: Map<string, NestedCardIndex<T, K, string | number>>;
     private indexRef;
     private initPromise;
     private queuePromise;

@@ -55,13 +55,17 @@ export class CardIndex<T extends CardLike, K extends string | number = string | 
     }
 }
 
-export class NestedCardIndex<T extends CardLike, K extends string | number = string | number> {
-    private readonly items: Map<K, Map<K, Set<string>>> = new Map();
+export class NestedCardIndex<
+    T extends CardLike,
+    K1 extends string | number = string | number,
+    K2 extends string | number = string | number
+> {
+    private readonly items: Map<K1, Map<K2, Set<string>>> = new Map();
 
     constructor(
         readonly name: string,
-        private readonly getKey1: KeyGetter<T, K>,
-        private readonly getKey2: KeyGetter<T, K>,
+        private readonly getKey1: KeyGetter<T, K1>,
+        private readonly getKey2: KeyGetter<T, K2>,
         private readonly validator: Validator<T>
     ) {}
 
@@ -86,7 +90,7 @@ export class NestedCardIndex<T extends CardLike, K extends string | number = str
         this.items.get(k1)?.get(k2)?.delete(card.cardId);
     }
 
-    get(k1: K, k2: K | undefined): ReadonlySet<string> {
+    get(k1: K1, k2: K2 | undefined): ReadonlySet<string> {
         if (k2 === undefined) return new Set();
         return this.items.get(k1)?.get(k2) ?? new Set();
     }
