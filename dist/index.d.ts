@@ -91,7 +91,7 @@ declare class CardPool<T extends CardLike, K extends string | number = string | 
     clear(): void;
     getIndex(name: string): CardIndex<T, K> | undefined;
     getNestedIndex(name: string): NestedCardIndex<T, K> | undefined;
-    init(): Promise<this>;
+    init(): Promise<void>;
     private enqueue;
     refresh(cardIds?: string[]): Promise<void>;
 }

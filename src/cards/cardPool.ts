@@ -23,7 +23,7 @@ export class CardPool<T extends CardLike, K extends string | number = string | n
     private indexRef: (CardIndex<T, K> | NestedCardIndex<T, K>)[] = [];
 
     // --- Cache ---
-    private initPromise: Promise<this> | null = null;
+    private initPromise: Promise<void> | null = null;
     private queuePromise = Promise.resolve();
 
     constructor(
@@ -124,22 +124,20 @@ export class CardPool<T extends CardLike, K extends string | number = string | n
     }
 
     // --- Cache ---
-    async init(): Promise<this> {
+    async init(): Promise<void> {
+        console.log(this.initPromise);
         if (this.initPromise) return this.initPromise;
 
         const fn = async () => {
             try {
                 this.clear();
-                this.indexRef = [];
                 const cards = await this.cardSchema.fetchAll();
                 this.insert(cards);
                 this.emit("cacheRefreshed", cards, "full");
                 this.emit("initialized");
-                return this;
             } catch (err) {
                 this.initPromise = null;
                 console.error("[CardPool] Error initializing cache", err instanceof Error ? err.message : err);
-                return this;
             }
         };
 

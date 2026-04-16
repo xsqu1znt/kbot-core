@@ -403,20 +403,18 @@ var CardPool = class extends EventEmitter {
   }
   // --- Cache ---
   async init() {
+    console.log(this.initPromise);
     if (this.initPromise) return this.initPromise;
     const fn = async () => {
       try {
         this.clear();
-        this.indexRef = [];
         const cards = await this.cardSchema.fetchAll();
         this.insert(cards);
         this.emit("cacheRefreshed", cards, "full");
         this.emit("initialized");
-        return this;
       } catch (err) {
         this.initPromise = null;
         console.error("[CardPool] Error initializing cache", err instanceof Error ? err.message : err);
-        return this;
       }
     };
     this.initPromise = fn();
@@ -785,11 +783,11 @@ var NestedCardIndex = class {
     const k1 = this.getKey1(card);
     const k2 = this.getKey2(card);
     if (k1 === void 0 || k2 === void 0) return;
-    const outer = this.items.get(k1) ?? /* @__PURE__ */ new Map();
-    if (!outer) this.items.set(k1, outer);
+    let outer = this.items.get(k1);
+    if (!outer) this.items.set(k1, outer = /* @__PURE__ */ new Map());
     const bucket = outer.get(k2) ?? /* @__PURE__ */ new Set();
     bucket.add(card.cardId);
-    this.items.set(k1, bucket);
+    outer.set(k2, bucket);
   }
   remove(card) {
     const k1 = this.getKey1(card);

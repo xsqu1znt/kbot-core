@@ -75,12 +75,12 @@ export class NestedCardIndex<
         const k2 = this.getKey2(card);
         if (k1 === undefined || k2 === undefined) return;
 
-        const outer = this.items.get(k1) ?? new Map();
-        if (!outer) this.items.set(k1, outer);
+        let outer = this.items.get(k1);
+        if (!outer) this.items.set(k1, (outer = new Map()));
 
         const bucket = outer.get(k2) ?? new Set();
         bucket.add(card.cardId);
-        this.items.set(k1, bucket);
+        outer.set(k2, bucket);
     }
 
     remove(card: T): void {
