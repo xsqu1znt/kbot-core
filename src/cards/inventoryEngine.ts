@@ -3,9 +3,13 @@ import type { MongoSchemaBuilder } from "vimcord";
 import type { CardLike, InventoryCardLike, MappedInventoryCard } from "@/types/card.types.js";
 import type { CardEngine } from "./cardEngine.js";
 
-interface FetchInventoryCardOptions<InvCard extends InventoryCardLike> {
+interface FetchInventoryCardOptions<T extends InventoryCardLike> {
     limit?: number;
-    projection?: ProjectionType<InvCard>;
+    projection?: ProjectionType<T>;
+    /** Only fetch based on these card IDs. */
+    cardIds?: string[];
+    /** Only fetch based on these inv IDs. */
+    invIds?: string[];
 }
 
 export interface InventoryEngineConfig<
@@ -51,9 +55,17 @@ export class InventoryEngine<
     }
 
     async fetchAll(userId: string, options: FetchInventoryCardOptions<T2> = {}): Promise<MappedInventoryCard<T1, T2>[]> {
-        const { limit, projection } = options;
+        const { limit, projection, cardIds, invIds } = options;
 
-        const invCards = await this.config.inventorySchema.fetchAll({ userId }, projection, { limit });
+        const invCards = await this.config.inventorySchema.fetchAll(
+            {
+                userId,
+                ...(cardIds?.length && { cardId: { $in: cardIds } }),
+                ...(invIds?.length && { invId: { $in: invIds } })
+            },
+            projection,
+            { limit }
+        );
         return this.mapCards(invCards);
     }
 

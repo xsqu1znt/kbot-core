@@ -213,9 +213,13 @@ declare function createSearchField<T extends CardLike>(name: string, getKey: (ca
 /** Transforms the incoming search query before checking for matches. */
 transformer?: (query: string) => string): SearchField<T>;
 
-interface FetchInventoryCardOptions<InvCard extends InventoryCardLike> {
+interface FetchInventoryCardOptions<T extends InventoryCardLike> {
     limit?: number;
-    projection?: ProjectionType<InvCard>;
+    projection?: ProjectionType<T>;
+    /** Only fetch based on these card IDs. */
+    cardIds?: string[];
+    /** Only fetch based on these inv IDs. */
+    invIds?: string[];
 }
 interface InventoryEngineConfig<T1 extends CardLike, T2 extends InventoryCardLike, K extends string | number = string | number> {
     cardEngine: CardEngine<T1, T2, K>;
