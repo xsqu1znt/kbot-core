@@ -1,13 +1,22 @@
 {
     "name": "@xsqu1znt/kbot-core",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "The core systems used for my card bots.",
     "license": "MIT",
     "author": "xsqu1znt",
+    "type": "module",
     "main": "./dist/index.cjs",
     "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
-    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "require": "./dist/index.cjs",
+            "default": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+    },
     "publishConfig": {
         "access": "public"
     },
