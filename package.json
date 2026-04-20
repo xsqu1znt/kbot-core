@@ -1,10 +1,14 @@
 {
     "name": "@xsqu1znt/kbot-core",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "The core systems used for my card bots.",
     "license": "MIT",
     "author": "xsqu1znt",
     "type": "module",
+    "files": [
+        "dist",
+        "README.md"
+    ],
     "main": "./dist/index.cjs",
     "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -24,6 +28,7 @@
         "build": "tsup",
         "check": "tsc --noEmit",
         "format": "prettier --write \"./**/*.{ts,json}\"",
+        "prepack": "pnpm build",
         "push": "pnpm build && git add . && git commit -m \"chore: build - $(date +'%Y-%m-%d %H:%M:%S')\" && git push"
     },
     "peerDependencies": {
