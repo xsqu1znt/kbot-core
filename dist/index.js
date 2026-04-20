@@ -551,6 +551,7 @@ var CardEngine = class extends EventEmitter2 {
             identity: `${index.name}-${indexKey}`,
             cardIds: Array.from(cardIdSet)
           });
+          if (results.length >= limit) return results;
         }
       }
     }
@@ -563,6 +564,7 @@ var CardEngine = class extends EventEmitter2 {
           identity: `byId-${card.cardId}`,
           cardIds: [card.cardId]
         });
+        if (results.length >= limit) return results;
       }
     }
     return results;

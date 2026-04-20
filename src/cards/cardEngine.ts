@@ -253,6 +253,8 @@ export class CardEngine<
                         identity: `${index.name}-${indexKey}`,
                         cardIds: Array.from(cardIdSet)
                     });
+
+                    if (results.length >= limit) return results;
                 }
             }
         }
@@ -268,6 +270,8 @@ export class CardEngine<
                     identity: `byId-${card.cardId}`,
                     cardIds: [card.cardId]
                 });
+
+                if (results.length >= limit) return results;
             }
         }
 
