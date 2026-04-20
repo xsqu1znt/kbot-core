@@ -68,9 +68,7 @@ export class ImageManager {
         }
 
         const fetchImage = async () => {
-            console.debug(`⏳ Fetching '${url}'`);
             const res = await axios.get(url, { responseType: "arraybuffer" });
-            console.debug(`✓ Fetched '${url}'`);
 
             const buffer = Buffer.from(res.data, "binary");
 

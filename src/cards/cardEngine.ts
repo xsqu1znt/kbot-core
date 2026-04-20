@@ -291,49 +291,63 @@ export class CardEngine<
         const { excludeCards = [] } = options;
         const picked = new Set(excludeCards);
         const results: T1[] = [];
+        const index = this.pool.getIndex(this.config.cardSampleIndex);
+        const nestedIndex = this.pool.getNestedIndex(this.config.cardSampleNestedIndex);
+
+        const getAvailableCandidates = (type: K, rarity?: K): string[] => {
+            const ids =
+                rarity !== undefined
+                    ? nestedIndex?.get(type, rarity)
+                    : index?.get(type);
+
+            return Array.from(ids ?? []).filter(id => !picked.has(id));
+        };
 
         for (let i = 0; i < limit; i++) {
-            const selectedType = $.rnd.weighted(this.compiledSampleRates, t => t.compiledWeight);
+            const availableTypes = this.compiledSampleRates
+                .map(typeRate => {
+                    if (!typeRate.rarities?.length) {
+                        const candidates = getAvailableCandidates(typeRate.type as K);
+                        return candidates.length ? { typeRate, candidates } : null;
+                    }
 
-            let selectedRarity: K | undefined;
-            if (selectedType.rarities) {
-                selectedRarity = $.rnd.weighted(selectedType.rarities, r => r.compiledWeight).rarity as K;
-            }
+                    if (!nestedIndex) {
+                        console.warn(
+                            `[CardEngine] Sample failed; no nested index found for sample type '${typeRate.type}'`
+                        );
+                        return null;
+                    }
 
-            let candidates: Set<string> | undefined;
-            if (selectedRarity !== undefined) {
-                const nestedIndex = this.pool.getNestedIndex(this.config.cardSampleNestedIndex);
-                if (!nestedIndex) {
-                    console.warn(
-                        `[CardEngine] Sample failed; no nested index found for type '${selectedType.type}' and rarity '${selectedRarity}'`
-                    );
-                    return [];
-                }
+                    const availableRarities = typeRate.rarities
+                        .map(rarityRate => {
+                            const candidates = getAvailableCandidates(typeRate.type as K, rarityRate.rarity as K);
+                            return candidates.length ? { rarityRate, candidates } : null;
+                        })
+                        .filter((entry): entry is { rarityRate: CompiledWeightRarity; candidates: string[] } => !!entry);
 
-                candidates = new Set(nestedIndex.get(selectedType.type, selectedRarity));
-                if (!candidates?.size) {
-                    console.warn(
-                        `[CardEngine] Sample failed; no cards found for type '${selectedType.type}' and rarity '${selectedRarity}'`
-                    );
-                }
-            } else {
-                const index = this.pool.getIndex(this.config.cardSampleIndex);
-                if (!index) {
-                    console.warn(`[CardEngine] Sample failed; no index found for type '${selectedType.type}'`);
-                    return [];
-                }
+                    return availableRarities.length ? { typeRate, availableRarities } : null;
+                })
+                .filter(
+                    (
+                        entry
+                    ): entry is
+                        | { typeRate: CompiledWeightTier<K>; candidates: string[] }
+                        | {
+                              typeRate: CompiledWeightTier<K>;
+                              availableRarities: { rarityRate: CompiledWeightRarity; candidates: string[] }[];
+                          } => !!entry
+                );
 
-                candidates = new Set(index.get(selectedType.type));
-                if (!candidates?.size) {
-                    console.warn(`[CardEngine] Sample failed; no cards found for type '${selectedType.type}'`);
-                }
-            }
-
-            const availableCandidates = Array.from(candidates).filter(id => !picked.has(id));
-            if (!availableCandidates.length) {
+            if (!availableTypes.length) {
                 console.warn("[CardEngine] Sample failed; not enough cards available");
                 return [];
             }
+
+            const selectedType = $.rnd.weighted(availableTypes, t => t.typeRate.compiledWeight);
+            const availableCandidates =
+                "availableRarities" in selectedType
+                    ? $.rnd.weighted(selectedType.availableRarities, r => r.rarityRate.compiledWeight).candidates
+                    : selectedType.candidates;
 
             const cardId = $.rnd.choice(availableCandidates);
             picked.add(cardId);
