@@ -3,9 +3,7 @@
     "compilerOptions": {
         "rootDir": "./src",
         "outDir": "./dist",
-        "baseUrl": ".",
         "paths": { "@/*": ["./src/*"] },
-        "ignoreDeprecations": "6.0",
         "types": ["node"]
     },
     "include": ["src"],
