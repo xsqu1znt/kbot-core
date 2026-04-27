@@ -2,7 +2,7 @@ import type { FetchedImageWithSharp, MediaDimensions, RenderedMediaWithSharp } f
 
 import axios from "axios";
 import { AttachmentBuilder } from "discord.js";
-import { memory } from "qznt";
+import { $, memory } from "qznt";
 import sharp from "sharp";
 
 export interface CreateImageGalleryOptions {
@@ -22,13 +22,27 @@ export interface CreateImageGalleryOptions {
     outputScaleFactor?: number;
     /** @defaultValue 'gallery.png' */
     fileName?: string;
-    /** Whether to fail if an image couldn't be fetched. @defaultValue false */
-    failOnFetchFail?: boolean;
 }
 
 export class ImageManager {
-    private static readonly MAX_QUEUE_SIZE = 100;
-    private static readonly queue = new Map<string, Promise<Buffer<ArrayBuffer> | FetchedImageWithSharp>>();
+    static maxQueueSize = 50;
+
+    private static activeFetches = 0;
+    private static readonly pendingFetches: (() => void)[] = [];
+    private static readonly inflight = new Map<string, Promise<Buffer>>();
+
+    static async withSharp(buffer: Buffer): Promise<FetchedImageWithSharp> {
+        const canvas = sharp(buffer);
+        const metadata = await canvas.metadata();
+        return { canvas, buffer, metadata };
+    }
+
+    static async scaleBuffer(buffer: Buffer, factor: number): Promise<Buffer> {
+        const image = sharp(buffer);
+        const { width, height } = await image.metadata();
+        if (!width || !height) throw new Error("[ImageManager] Could not read image dimensions");
+        return image.resize(Math.round(width * factor), Math.round(height * factor)).toBuffer();
+    }
 
     static createRenderedMediaData(
         image: sharp.Sharp,
@@ -54,50 +68,75 @@ export class ImageManager {
         };
     }
 
-    static async fetch(url: string, useSharp?: boolean): Promise<Buffer<ArrayBuffer>>;
-    static async fetch(url: string, useSharp: true): Promise<FetchedImageWithSharp>;
-    static async fetch(url: string, useSharp?: boolean) {
-        const existing = this.queue.get(url);
-        if (existing) {
-            console.debug("Using buffer from queue");
-            return existing;
+    static async fetch(url: string): Promise<Buffer>;
+    static async fetch(url: string, withSharp: false): Promise<Buffer>;
+    static async fetch(url: string, withSharp: true): Promise<FetchedImageWithSharp>;
+    static async fetch(url: string, withSharp?: boolean): Promise<Buffer | FetchedImageWithSharp> {
+        const buffer = await this.getOrCreateFetch(url);
+        return withSharp ? this.withSharp(buffer) : buffer;
+    }
+
+    static setMaxQueueSize(maxQueueSize: number): void {
+        if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
+            throw new Error("[ImageManager] maxQueueSize must be a positive integer");
         }
 
-        if (this.queue.size >= ImageManager.MAX_QUEUE_SIZE) {
-            throw new Error("[ImageManager] Fetch queue is full");
-        }
+        this.maxQueueSize = maxQueueSize;
+        this.drainQueue();
+    }
 
-        const fetchImage = async () => {
-            const res = await axios.get(url, { responseType: "arraybuffer" });
+    private static runWithQueue<T>(task: () => Promise<T>): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const run = () => {
+                this.activeFetches++;
 
-            const buffer = Buffer.from(res.data, "binary");
+                task()
+                    .then(resolve, reject)
+                    .finally(() => {
+                        this.activeFetches--;
+                        this.drainQueue();
+                    });
+            };
 
-            if (useSharp) {
-                const canvas = sharp(buffer);
-                const metadata = await canvas.metadata();
-                return { canvas, buffer, metadata };
+            if (this.activeFetches < this.maxQueueSize) {
+                run();
+            } else {
+                this.pendingFetches.push(run);
             }
-
-            return buffer;
-        };
-
-        const promise = fetchImage().catch(err => {
-            throw new Error(`[ImageManager] Failed to fetch '${url}'`, { cause: err });
         });
+    }
 
-        this.queue.set(url, promise);
-
-        try {
-            return await promise;
-        } finally {
-            this.queue.delete(url);
+    private static drainQueue(): void {
+        while (this.activeFetches < this.maxQueueSize) {
+            const next = this.pendingFetches.shift();
+            if (!next) return;
+            next();
         }
     }
 
-    static async scaleBuffer(buffer: Buffer, factor: number): Promise<Buffer> {
-        const image = sharp(buffer);
-        const { width, height } = await image.metadata();
-        if (!width || !height) throw new Error("[ImageManager] Could not read image dimensions");
-        return image.resize(Math.round(width * factor), Math.round(height * factor)).toBuffer();
+    private static async fetchBuffer(url: string): Promise<Buffer> {
+        return $.async
+            .retry(
+                async () => {
+                    const res = await axios.get(url, { responseType: "arraybuffer" });
+                    return Buffer.from(res.data);
+                },
+                { retries: 3 }
+            )
+            .catch(err => {
+                throw new Error(`[ImageManager] Failed to fetch '${url}'`, { cause: err });
+            });
+    }
+
+    private static getOrCreateFetch(url: string): Promise<Buffer> {
+        const existing = this.inflight.get(url);
+        if (existing) return existing;
+
+        const promise = this.runWithQueue(() => this.fetchBuffer(url)).finally(() => {
+            this.inflight.delete(url);
+        });
+
+        this.inflight.set(url, promise);
+        return promise;
     }
 }
