@@ -1,6 +1,6 @@
 {
     "name": "@xsqu1znt/kbot-core",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "The core systems used for my card bots.",
     "license": "MIT",
     "author": "xsqu1znt",
@@ -28,6 +28,7 @@
         "build": "tsup",
         "check": "tsc --noEmit",
         "format": "prettier --write \"./**/*.{ts,json}\"",
+        "test:mint-concurrency": "tsx tests/cardEngine.mint-concurrency.test.ts",
         "prepack": "pnpm build",
         "push": "pnpm build && git add . && git commit -m \"chore: build - $(date +'%Y-%m-%d %H:%M:%S')\" && git push"
     },

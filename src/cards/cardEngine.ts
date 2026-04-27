@@ -4,10 +4,11 @@ import type { CardLike, InventoryCardLike } from "@/types/card.types.js";
 import type { CardIndex, NestedCardIndex } from "./cardIndex.js";
 import type { CardPoolEvents } from "./cardPool.js";
 
-import { EventEmitter } from "node:stream";
-import { $ } from "qznt";
-import { useBunnyCDN } from "@/media/index.js";
+import { EventEmitter } from "node:events";
+import qznt from "qznt";
 import { CardPool } from "./cardPool.js";
+
+const { $ } = qznt;
 
 interface SearchField<T extends CardLike> {
     name: string;
@@ -99,6 +100,18 @@ interface IndexedSearchResult {
 interface SampleOptions {
     /** Card IDs to exclude from sample results. */
     excludeCards?: string[];
+}
+
+interface MintOptions extends SampleOptions {
+    /** Maximum stale/raced candidates to retry before returning the successful mints. */
+    maxAttempts?: number;
+}
+
+interface SampleByTypeOptions<T extends CardLike> extends SampleOptions {
+    /** When provided, each sampled card is claimed with an atomic findOneAndUpdate and returned after update. */
+    atomicUpdate?: UpdateQuery<T>;
+    /** Maximum stale/raced candidates to retry before returning the successful samples. */
+    maxAttempts?: number;
 }
 
 export interface CardInsertData<T> {
@@ -291,67 +304,40 @@ export class CardEngine<
         const { excludeCards = [] } = options;
         const picked = new Set(excludeCards);
         const results: T1[] = [];
-        const index = this.pool.getIndex(this.config.cardSampleIndex);
-        const nestedIndex = this.pool.getNestedIndex(this.config.cardSampleNestedIndex);
-
-        const getAvailableCandidates = (type: K, rarity?: K): string[] => {
-            const ids =
-                rarity !== undefined
-                    ? nestedIndex?.get(type, rarity)
-                    : index?.get(type);
-
-            return Array.from(ids ?? []).filter(id => !picked.has(id));
-        };
 
         for (let i = 0; i < limit; i++) {
-            const availableTypes = this.compiledSampleRates
-                .map(typeRate => {
-                    if (!typeRate.rarities?.length) {
-                        const candidates = getAvailableCandidates(typeRate.type as K);
-                        return candidates.length ? { typeRate, candidates } : null;
-                    }
-
-                    if (!nestedIndex) {
-                        console.warn(
-                            `[CardEngine] Sample failed; no nested index found for sample type '${typeRate.type}'`
-                        );
-                        return null;
-                    }
-
-                    const availableRarities = typeRate.rarities
-                        .map(rarityRate => {
-                            const candidates = getAvailableCandidates(typeRate.type as K, rarityRate.rarity as K);
-                            return candidates.length ? { rarityRate, candidates } : null;
-                        })
-                        .filter((entry): entry is { rarityRate: CompiledWeightRarity; candidates: string[] } => !!entry);
-
-                    return availableRarities.length ? { typeRate, availableRarities } : null;
-                })
-                .filter(
-                    (
-                        entry
-                    ): entry is
-                        | { typeRate: CompiledWeightTier<K>; candidates: string[] }
-                        | {
-                              typeRate: CompiledWeightTier<K>;
-                              availableRarities: { rarityRate: CompiledWeightRarity; candidates: string[] }[];
-                          } => !!entry
-                );
-
-            if (!availableTypes.length) {
+            const card = await this.sampleOne(picked);
+            if (!card) {
                 console.warn("[CardEngine] Sample failed; not enough cards available");
                 return [];
             }
 
-            const selectedType = $.rnd.weighted(availableTypes, t => t.typeRate.compiledWeight);
-            const availableCandidates =
-                "availableRarities" in selectedType
-                    ? $.rnd.weighted(selectedType.availableRarities, r => r.rarityRate.compiledWeight).candidates
-                    : selectedType.candidates;
+            picked.add(card.cardId);
+            results.push(card);
+        }
 
-            const cardId = $.rnd.choice(availableCandidates);
-            picked.add(cardId);
-            results.push((await this.pool.get(cardId))!);
+        return results;
+    }
+
+    /** Samples cards from one sample type. If `atomicUpdate` is provided, claims each result atomically. */
+    async sampleByType(type: K, limit: number, options: SampleByTypeOptions<T1> = {}): Promise<T1[]> {
+        if (options.atomicUpdate) return await this.sampleAndAtomicUpdate(limit, options.atomicUpdate, { ...options, type });
+
+        await this.pool.init();
+
+        const { excludeCards = [] } = options;
+        const picked = new Set(excludeCards);
+        const results: T1[] = [];
+
+        for (let i = 0; i < limit; i++) {
+            const card = await this.sampleOne(picked, type);
+            if (!card) {
+                console.warn(`[CardEngine] Sample failed; not enough '${String(type)}' cards available`);
+                return [];
+            }
+
+            picked.add(card.cardId);
+            results.push(card);
         }
 
         return results;
@@ -359,11 +345,18 @@ export class CardEngine<
 
     /** Samples a number of cards from the card pool and updates them, returning the modified cards. */
     async sampleAndUpdate(limit: number, update: UpdateQuery<T1>, options?: SampleOptions): Promise<T1[]> {
+        if (isPrintIncrementUpdate(update)) return await this.sampleAndAtomicUpdate(limit, update, options);
+
         const cards = await this.sample(limit, options);
         return await this.update(
             cards.map(c => c.cardId),
             update
         );
+    }
+
+    /** Samples cards and atomically increments `state.print`, returning each caller's allocated print. */
+    async sampleAndMint(limit: number, options: MintOptions = {}): Promise<T1[]> {
+        return await this.sampleAndAtomicUpdate(limit, { $inc: { "state.print": 1 } } as UpdateQuery<T1>, options);
     }
 
     /** Creates a new card in the database and uploads its image to the CDN. */
@@ -372,6 +365,7 @@ export class CardEngine<
         if (existing) throw new Error(`[CardEngine] Card '${data.card.cardId}' already exists`);
         if (!data.imageUrl) throw new Error(`[CardEngine] Card '${data.card.cardId}' must have an image URL`);
 
+        const { useBunnyCDN } = await import("@/media/utils/BunnyCDN.js");
         const bunnyCDN = useBunnyCDN();
 
         await stageFns?.[0]();
@@ -401,6 +395,7 @@ export class CardEngine<
                 if (!existing) return false;
 
                 try {
+                    const { useBunnyCDN } = await import("@/media/utils/BunnyCDN.js");
                     const bunnyCDN = useBunnyCDN();
                     await bunnyCDN.delete(existing.asset.cdn.filePath);
                     await this.config.schemas.card.delete({ cardId });
@@ -432,11 +427,117 @@ export class CardEngine<
         return this.pool.insert(updated);
     }
 
+    private async sampleAndAtomicUpdate(
+        limit: number,
+        update: UpdateQuery<T1>,
+        options: MintOptions & { type?: K } = {}
+    ): Promise<T1[]> {
+        await this.pool.init();
+
+        const { excludeCards = [], maxAttempts = Math.max(limit * 5, limit + 10), type } = options;
+        const excluded = new Set(excludeCards);
+        const results: T1[] = [];
+        let attempts = 0;
+
+        while (results.length < limit && attempts < maxAttempts) {
+            attempts++;
+
+            const candidate = await this.sampleOne(excluded, type);
+            if (!candidate) break;
+
+            const updated = await this.config.schemas.card.update(
+                {
+                    cardId: candidate.cardId,
+                    "state.released": true,
+                    "state.droppable": true
+                } as any,
+                update,
+                { returnDocument: "after" }
+            );
+
+            excluded.add(candidate.cardId);
+
+            if (!updated) continue;
+
+            // Refresh from the database instead of inserting `updated` directly; concurrent
+            // mints can complete out of order and should not roll the cached print backward.
+            await this.pool.refresh([updated.cardId]);
+            results.push(updated);
+        }
+
+        if (results.length !== limit) {
+            console.warn(`[CardEngine] Atomic sample update returned ${results.length}/${limit} card(s)`);
+        }
+
+        return results;
+    }
+
+    private async sampleOne(excludeCards: Set<string>, type?: K): Promise<T1 | null> {
+        const index = this.pool.getIndex(this.config.cardSampleIndex);
+        const nestedIndex = this.pool.getNestedIndex(this.config.cardSampleNestedIndex);
+
+        const getAvailableCandidates = (sampleType: K, rarity?: K): string[] => {
+            const ids = rarity !== undefined ? nestedIndex?.get(sampleType, rarity) : index?.get(sampleType);
+            return Array.from(ids ?? []).filter(id => !excludeCards.has(id));
+        };
+
+        const rates = type === undefined ? this.compiledSampleRates : this.compiledSampleRates.filter(r => r.type === type);
+        const availableTypes = rates
+            .map(typeRate => {
+                if (!typeRate.rarities?.length) {
+                    const candidates = getAvailableCandidates(typeRate.type as K);
+                    return candidates.length ? { typeRate, candidates } : null;
+                }
+
+                if (!nestedIndex) {
+                    console.warn(`[CardEngine] Sample failed; no nested index found for sample type '${typeRate.type}'`);
+                    return null;
+                }
+
+                const availableRarities = typeRate.rarities
+                    .map(rarityRate => {
+                        const candidates = getAvailableCandidates(typeRate.type as K, rarityRate.rarity as K);
+                        return candidates.length ? { rarityRate, candidates } : null;
+                    })
+                    .filter((entry): entry is { rarityRate: CompiledWeightRarity; candidates: string[] } => !!entry);
+
+                return availableRarities.length ? { typeRate, availableRarities } : null;
+            })
+            .filter(
+                (
+                    entry
+                ): entry is
+                    | { typeRate: CompiledWeightTier<K>; candidates: string[] }
+                    | {
+                          typeRate: CompiledWeightTier<K>;
+                          availableRarities: { rarityRate: CompiledWeightRarity; candidates: string[] }[];
+                      } => !!entry
+            );
+
+        if (!availableTypes.length) {
+            const candidates = type === undefined ? [] : getAvailableCandidates(type);
+            if (!candidates.length) return null;
+
+            const cardId = $.rnd.choice(candidates);
+            return (await this.pool.get(cardId)) ?? null;
+        }
+
+        const selectedType = $.rnd.weighted(availableTypes, t => t.typeRate.compiledWeight);
+        const availableCandidates =
+            "availableRarities" in selectedType
+                ? $.rnd.weighted(selectedType.availableRarities, r => r.rarityRate.compiledWeight).candidates
+                : selectedType.candidates;
+
+        const cardId = $.rnd.choice(availableCandidates);
+        return (await this.pool.get(cardId)) ?? null;
+    }
+
     /** Swaps the image of a card in the database. */
     async swapImage(cardId: string, newImageUrl: string, options: { prefix: string; cdnRoute: string }): Promise<T1 | null> {
         const oldCard = await this.get(cardId);
         if (!oldCard) return null;
 
+        const { useBunnyCDN } = await import("@/media/utils/BunnyCDN.js");
         const bunnyCDN = useBunnyCDN();
 
         const imageResult = await bunnyCDN.uploadImageFromUrl(
@@ -496,6 +597,15 @@ function compileWeightPool<K extends string | number = string | number>(
 
         return compiled;
     });
+}
+
+function isPrintIncrementUpdate<T extends CardLike>(update: UpdateQuery<T>): boolean {
+    if (!update || typeof update !== "object") return false;
+
+    const inc = (update as { $inc?: Record<string, unknown> }).$inc;
+    if (!inc || typeof inc !== "object") return false;
+
+    return inc["state.print"] === 1;
 }
 
 export function createSearchField<T extends CardLike>(

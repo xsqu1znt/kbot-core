@@ -2,7 +2,7 @@ import type { MongoSchemaBuilder } from "vimcord";
 import type { CardLike } from "@/types/card.types.js";
 import type { CardIndex, NestedCardIndex } from "./cardIndex.js";
 
-import { EventEmitter } from "node:stream";
+import { EventEmitter } from "node:events";
 
 export interface CardPoolEvents<T extends CardLike> {
     initialized: [];
