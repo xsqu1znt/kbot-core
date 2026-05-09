@@ -25,10 +25,6 @@ export interface CreateImageGalleryOptions {
 }
 
 export class ImageManager {
-    static maxQueueSize = 50;
-
-    private static activeFetches = 0;
-    private static readonly pendingFetches: (() => void)[] = [];
     private static readonly inflight = new Map<string, Promise<Buffer>>();
 
     static async withSharp(buffer: Buffer): Promise<FetchedImageWithSharp> {
@@ -76,44 +72,6 @@ export class ImageManager {
         return withSharp ? this.withSharp(buffer) : buffer;
     }
 
-    static setMaxQueueSize(maxQueueSize: number): void {
-        if (!Number.isInteger(maxQueueSize) || maxQueueSize < 1) {
-            throw new Error("[ImageManager] maxQueueSize must be a positive integer");
-        }
-
-        this.maxQueueSize = maxQueueSize;
-        this.drainQueue();
-    }
-
-    private static runWithQueue<T>(task: () => Promise<T>): Promise<T> {
-        return new Promise((resolve, reject) => {
-            const run = () => {
-                this.activeFetches++;
-
-                task()
-                    .then(resolve, reject)
-                    .finally(() => {
-                        this.activeFetches--;
-                        this.drainQueue();
-                    });
-            };
-
-            if (this.activeFetches < this.maxQueueSize) {
-                run();
-            } else {
-                this.pendingFetches.push(run);
-            }
-        });
-    }
-
-    private static drainQueue(): void {
-        while (this.activeFetches < this.maxQueueSize) {
-            const next = this.pendingFetches.shift();
-            if (!next) return;
-            next();
-        }
-    }
-
     private static async fetchBuffer(url: string): Promise<Buffer> {
         return $.async
             .retry(
@@ -132,7 +90,7 @@ export class ImageManager {
         const existing = this.inflight.get(url);
         if (existing) return existing;
 
-        const promise = this.runWithQueue(() => this.fetchBuffer(url)).finally(() => {
+        const promise = this.fetchBuffer(url).finally(() => {
             this.inflight.delete(url);
         });
 
